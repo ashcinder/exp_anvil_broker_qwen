@@ -9,6 +9,7 @@ description = "BrokerChain/TDR sharding testbed on Anvil — ground-up refactor 
 requires-python = ">=3.11"
 dependencies = [
   "web3>=7.16,<8",
+  "requests>=2.31,<3",
   "eth-account>=0.13,<0.14",
   "PyYAML>=6.0",
   "psutil>=5.9",
@@ -19,3 +20,7 @@ dev = ["pytest>=8", "matplotlib>=3.8"]
 
 [tool.setuptools]
 packages = ["brokerlab"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+norecursedirs = ["backups", "tmp", "out", "out_*", ".git", ".pytest_cache"]

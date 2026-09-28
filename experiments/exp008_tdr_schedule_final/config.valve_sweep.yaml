@@ -81,11 +81,10 @@ broker:
 
 traffic:
   kind: real_csv
-  # 2026-09-24 导入的新主网交易记录；相对路径按项目根目录解析。
-  real_csv_path: trace/ethereum_202509.csv
-  # 新文件以合约交互为主；只取地址/方向/ETH value 作为分片负载代理，
-  # 不重放 calldata 或原合约状态。其他实验默认仍为 false。
-  allow_contract_endpoints: true
+  # 清洗后的真实主网交易记录；相对路径按项目根目录解析。
+  real_csv_path: trace/ETH_cleaned.csv
+  # Clean 实验排除合约端点，只保留普通账户之间的 ETH 转账。
+  allow_contract_endpoints: false
   value_floor_eth: 0.25              # 与cap一起过滤原始记录，不裁剪金额；会改变所选trace
   value_cap_eth: 3.0
   max_extract: 50

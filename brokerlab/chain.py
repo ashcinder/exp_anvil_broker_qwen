@@ -17,6 +17,7 @@ import time
 import typing as t
 from pathlib import Path
 
+import requests
 from web3 import Web3
 from web3.providers import HTTPProvider
 
@@ -171,18 +172,28 @@ class AnvilCluster:
 
 
 class Connections:
-    """每个分片持有一个 Web3 句柄；首次使用时才创建，之后缓存复用。"""
+    """每个分片持有一个 Web3 句柄；首次使用时才创建，之后缓存复用。
+
+    所有节点都是本机 Anvil，不应读取系统代理或 ``.netrc``。requests 默认
+    ``trust_env=True`` 会让每次 RPC 在 Windows 上反复做文件/代理环境检查；
+    setup 期成千上万次 nonce/余额读取会因此看似卡死。
+    """
 
     def __init__(self, cfg: ChainCfg) -> None:
         self._urls = {
             i: f"http://127.0.0.1:{cfg.base_port + i}" for i in range(cfg.num_shards)
         }
         self._web3: t.Dict[int, Web3] = {}
+        self._sessions: t.Dict[int, requests.Session] = {}
 
     def web3(self, shard: int) -> Web3:
         w3 = self._web3.get(shard)
         if w3 is None:
-            w3 = Web3(HTTPProvider(self._urls[shard], request_kwargs={"timeout": 60}))
+            session = requests.Session()
+            session.trust_env = False
+            w3 = Web3(HTTPProvider(self._urls[shard], session=session,
+                                   request_kwargs={"timeout": 60}))
+            self._sessions[shard] = session
             self._web3[shard] = w3
         return w3
 

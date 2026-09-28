@@ -1,33 +1,35 @@
-# exp008 · 新主网 trace 低余额筛选与正式验证
+# exp008 · Clean 主网 trace 正式验证
 
-## 当前配置：恢复最初的新数据实验参数（2026-09-27 19:13）
+## 当前配置：恢复最初的资金与交易金额参数
 
-用户已确认使用最新数据 `trace/ethereum_202509.csv`，不恢复旧clean数据。
-以 `.codex_backups/20260925_ewma_tdr_fix/experiments/exp008_tdr_schedule_final/config.yaml`
-为原始配置依据，将初始余额（含五个arm的fund）设为0.5 ETH，金额过滤改为0.05～5 ETH。
-按用户后续要求，仅运行1个session验证该金额区间；单场结果不代表统计显著性。
+实验 8 当前使用清洗数据 `trace/ETH_cleaned.csv`，并排除合约端点。
+初始余额（含五个 arm 的 fund）恢复为 150 ETH，交易金额过滤恢复为 0.01～10 ETH。
+按用户要求仅运行 1 个 session；单场结果不代表统计显著性。
 历史修复代码保留，未运行实验。下方Valve扫描及余额搜索章节仅作历史记录。
 
 | 参数 | 当前值 |
 |---|---|
-| 数据集 | ethereum_202509.csv；允许合约端点 |
-| 初始余额 | 每broker每分片0.5 ETH；50 brokers × 16分片，总计400 ETH |
-| 金额过滤 | 0.05～5 ETH；过滤记录，不裁剪金额 |
+| 数据集 | ETH_cleaned.csv；排除合约端点 |
+| 初始余额 | 每 broker 每分片 150 ETH；50 brokers × 16 分片，总计 120000 ETH |
+| 金额过滤 | 0.01～10 ETH；过滤记录，不裁剪金额 |
 | 方案 | Plain、Valve=1.3、Proportional ε=0.1、硬窗口Topup ε=0.1、EWMA Topup ε=0.95 |
 | 硬窗口／EWMA半衰期 | 20块／20块 |
 | q_min／chi／timeout | 0.1／10块／20块 |
 | offset／poll | 3块／1秒；spread沿用当前代码默认5 |
-| 规模 | 1个session，每方案40000笔；五方案共200000笔CTX |
-| 注入目标 | 120 CTX/逻辑块，块时间1秒 |
+| 规模 | 1 个 session，每方案 80000 笔；五方案共 400000 笔 CTX |
+| 注入目标 | 120 CTX/逻辑块；不是强制 120 CTX/墙钟秒 |
 | 并发 | sender_window=2，max_inflight=24（恢复原始值） |
 
 Valve实际阈值由arm中的1.3决定；全局tdr_cap_mult=2.0只是原始备用值。
 已移除Valve扫描开关/阈值列表/每方案10000笔等新增控制项，run.py默认不启用扫描。
-session数量在exp.exp008_sessions调整；笔数由exp.ctx_per_broker × scale.num_brokers决定。
+session 数量在 `exp.exp008_sessions` 调整；每方案总笔数请直接修改 `exp.exp008_ctx_total`。
+程序会自动换算内部的 `ctx_per_broker`，并在终端打印总数和换算公式。
+十六个 Anvil 分片以最慢块高作为全局逻辑时钟；Windows 调度下逻辑块可能慢于理想的 1 秒，
+因此报告的墙钟注入 CTX/s 可能低于 120，但不代表每逻辑块的到达目标失效。
 小数余额解析和结果记录精度等bug修复未回退，策略代码未改。
 
-注意：最大单笔5 ETH是初始单账户余额0.5 ETH的10倍，部分交易初期可能因余额不足走Relay。
-并发已恢复原值，不能保证实际吞吐仍达到110～120；本轮不预设EWMA获胜。
+最大单笔 10 ETH 低于每个 broker 每分片 150 ETH 的初始余额，不会因单笔金额大于初始余额而先天无法支付。
+并发已恢复原值，不能保证实际吞吐仍达到 110～120；本轮不预设 EWMA 获胜。
 
 ```powershell
 cd D:\BaiduNetdiskDownload\exp_anvil_broker_qwen\exp_anvil_broker_qwen
@@ -69,7 +71,7 @@ exp:
 默认六个Valve方案，加Plain、Proportional、硬窗口Topup、EWMA四个共享对照，
 一共10组 × 10000笔 × 1 session = **100000笔CTX**。对照不随每个Valve阈值重复跑。
 所有方案固定每broker每分片0.5 ETH、同一trace、同场路由种子；每组仍重新起链。
-保留金额过滤0.001～1 ETH、ethereum_202509.csv、120 CTX/秒目标、50 brokers、16分片。
+保留金额过滤0.001～1 ETH、ETH_cleaned.csv、120 CTX/秒目标、50 brokers、16分片；排除合约端点。
 EWMA epsilon=0.95/半衰期20块，Proportional和硬窗口Topup epsilon=0.1/窗口20块不变。
 六个Valve的绝对触发水位分别为0.525、0.55、0.65、0.75、1、1.25 ETH。
 
@@ -114,7 +116,7 @@ python experiments/exp008_tdr_schedule_final/calibrate_balance.py
 
 | 参数 | 当前设置 |
 |---|---|
-| 数据集 | `trace/ethereum_202509.csv`，不是 clean CSV；允许合约端点 |
+| 数据集 | `trace/ETH_cleaned.csv`；排除合约端点 |
 | 单笔金额过滤 | 0.001–1 ETH；只过滤，不裁剪/缩放金额 |
 | 初始余额搜索 | 每 broker 每分片 0.005、0.01、0.05、0.1、0.2、0.3、0.4、0.5 ETH |
 | 系统规模 | 50 brokers × 16 分片；全体初始流动性为所选余额 × 800 |

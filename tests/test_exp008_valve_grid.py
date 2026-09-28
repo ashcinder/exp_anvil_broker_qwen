@@ -64,6 +64,24 @@ def test_legacy_arms_untouched():
     assert runner.prepare_valve_sweep(cfg) == (cfg, [])
 
 
+def test_total_ctx_is_authoritative_and_resolved_per_broker():
+    cfg = runner.apply_overrides(config(), ["exp.exp008_valve_sweep=false",
+                                            "exp.exp008_ctx_total=800",
+                                            "exp.ctx_per_broker=999"])
+    resolved, overrides = runner.prepare_ctx_total(cfg)
+    assert overrides == ["exp.ctx_per_broker=16"]
+    assert resolved.exp["ctx_per_broker"] == 16
+    assert resolved.scale.num_brokers * resolved.exp["ctx_per_broker"] == 800
+
+
+@pytest.mark.parametrize("count", [0, -1, 801, 800.5, True])
+def test_invalid_total_ctx_rejected(count):
+    cfg = runner.apply_overrides(config(), ["exp.exp008_valve_sweep=false"])
+    cfg.exp["exp008_ctx_total"] = count
+    with pytest.raises(ValueError):
+        runner.prepare_ctx_total(cfg)
+
+
 def test_dry_run_no_subprocess(monkeypatch, capsys):
     config_for_test = config()
     monkeypatch.setattr(runner, "load_config", lambda path: config_for_test)

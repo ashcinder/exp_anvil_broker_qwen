@@ -522,6 +522,8 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                 "base_floor_frac": exp_param(cfg, "tdr_base_floor_frac", float),
                 "demand_ewma_half_life": (exp_param(cfg, "tdr_ewma_half_life", float)
                                           if hl is None else hl),
+                "demand_ewma_min_blocks": int(cfg.exp.get(
+                    "tdr_ewma_min_blocks", 5)),
                 "target_cap": float(cfg.exp.get("tdr_target_cap", 0.0)),
                 "min_reserve_wei": int(float(
                     cfg.exp.get("tdr_min_reserve_eth", 0.0)) * ETH),
@@ -944,7 +946,7 @@ def main() -> int:
                      ) if engine != "plain" else ""
             inject = co.get("achieved_injection_ctx_per_s")
             print(f"  {label}: 完成吞吐 {s['throughput_ctx_per_s']} CTX/s "
-                  f"| 实际注入 {inject} CTX/s "
+                  f"| 墙钟注入 {inject} CTX/s "
                   f"| Broker直达 {s['served']} | Relay回退 {s['relayed']} "
                   f"| 失败 {s['failed']} | 预算拒绝 {co['budget_denied']} "
                   f"| 全局净变化 {s['global_net_sum_wei']} wei{extra}")

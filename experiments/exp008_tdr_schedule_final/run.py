@@ -72,11 +72,34 @@ def prepare_valve_sweep(cfg):
             "All arms use the same trace and within-session route seed. "
             "One session is exploratory, not evidence of statistical significance. "
             "Hard-window epsilon=0.1 versus EWMA epsilon=0.95: not a pure estimator ablation.")
-    overrides = [f"exp.ctx_per_broker={int(count) // brokers}",
+    overrides = [f"exp.exp008_ctx_total={int(count)}",
+                 f"exp.ctx_per_broker={int(count) // brokers}",
                  f"broker.initial_balance_eth={balance}",
                  "exp.arms=" + ",".join(arms),
                  f"exp.exp008_final_arm=topup@{balance}@0.95@20.0",
                  "exp.exp008_design_note=" + note]
+    return apply_overrides(cfg, overrides), overrides
+
+
+def prepare_ctx_total(cfg):
+    """Resolve the user-facing per-arm total into exp003's per-broker count."""
+    if cfg.exp.get("exp008_valve_sweep", False):
+        return cfg, []
+    if "exp008_ctx_total" not in cfg.exp:
+        return cfg, []
+    count = cfg.exp["exp008_ctx_total"]
+    brokers = cfg.scale.num_brokers
+    if (isinstance(count, bool) or not isinstance(count, (int, float))
+            or not math.isfinite(float(count)) or float(count) <= 0
+            or not float(count).is_integer()):
+        raise ValueError("exp008_ctx_total must be a positive integer")
+    count = int(count)
+    if brokers <= 0 or count % brokers:
+        raise ValueError(
+            "exp008_ctx_total must be divisible by scale.num_brokers "
+            f"({brokers}); got {count}"
+        )
+    overrides = [f"exp.ctx_per_broker={count // brokers}"]
     return apply_overrides(cfg, overrides), overrides
 
 
@@ -277,11 +300,21 @@ def main() -> int:
     args = ap.parse_args()
     cfg = apply_overrides(load_config(args.config), args.overrides)
     cfg, generated = prepare_valve_sweep(cfg)
-    effective_overrides = args.overrides + generated
+    cfg, count_generated = prepare_ctx_total(cfg)
+    effective_overrides = args.overrides + generated + count_generated
+    brokers = cfg.scale.num_brokers
+    per_broker = int(cfg.exp["ctx_per_broker"])
+    total_ctx = brokers * per_broker
+    sessions = int(float(cfg.exp.get("exp008_sessions", 2)))
+    arm_count = len(_expected_arm_tags(cfg))
+    print(f"  exp008 | workload per arm={total_ctx} CTX "
+          f"({brokers} brokers x {per_broker} CTX/broker)")
+    print(f"  exp008 | full run={total_ctx * arm_count * sessions} CTX "
+          f"({arm_count} arms x {sessions} session); arrival target="
+          f"{int(cfg.exp['rate'])} CTX/logical-block, not wall-clock second")
     if args.dry_run:
         print(json.dumps(to_params_dict(cfg), ensure_ascii=False, indent=2))
         return 0
-    sessions = int(float(cfg.exp.get("exp008_sessions", 2)))
     out_base = HERE / "out" / datetime.now().strftime("%Y%m%d_%H%M%S")
     out_base.mkdir(parents=True)
     plan_names = [arm_display_name(tag, language="cn")

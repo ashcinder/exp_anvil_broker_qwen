@@ -40,6 +40,29 @@ def test_port_free_detects_active_listener():
         srv.close()
 
 
+def test_connections_disable_environment_proxy_and_netrc(monkeypatch):
+    captured = {}
+
+    class FakeProvider:
+        def __init__(self, endpoint, *, session, request_kwargs):
+            captured.update(endpoint=endpoint, session=session,
+                            request_kwargs=request_kwargs)
+
+    class FakeWeb3:
+        def __init__(self, provider):
+            self.provider = provider
+
+    monkeypatch.setattr(chain, "HTTPProvider", FakeProvider)
+    monkeypatch.setattr(chain, "Web3", FakeWeb3)
+    conns = chain.Connections(ChainCfg(num_shards=1, base_port=8600))
+
+    first = conns.web3(0)
+    assert conns.web3(0) is first
+    assert captured["endpoint"] == "http://127.0.0.1:8600"
+    assert captured["session"].trust_env is False
+    assert captured["request_kwargs"] == {"timeout": 60}
+
+
 def test_partial_cluster_start_failure_cleans_only_owned_children(monkeypatch, tmp_path):
     """第二个 Popen 失败时，第一个已启动子进程和两个日志句柄都必须回收。"""
     first = Mock()

@@ -223,7 +223,7 @@ def main(argv=None):
         chosen["exp"]["exp008_design_note"] = (
             f"{DESIGN_NOTE} "
             f"Selected from 8 paired 5000-CTX balance pilots: {job}. {RULE} "
-            "Amount filter 0.001..1 ETH on ethereum_202509.csv. "
+            "Amount filter 0.001..1 ETH on ETH_cleaned.csv; contract endpoints excluded. "
             "Formal seeds 7/17 differ, but pilot is a trace prefix, not a time-window holdout. "
             "EWMA and hard-window epsilon differ: not a pure estimator ablation. "
             f"Pilot EWMA strictly best Relay: {selected['ewma_beats_all_relay']}.")
