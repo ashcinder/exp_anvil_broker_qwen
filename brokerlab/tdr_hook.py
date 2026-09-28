@@ -267,9 +267,11 @@ def tdr_engine_from_payload(payload: t.Mapping[str, t.Any],
                      base_lead_blocks=float(tp.get("base_lead_blocks", 6.0)),
                      base_safety=float(tp.get("base_safety", 2.0)),
                      base_floor_frac=float(tp.get("base_floor_frac", 0.05)),
-                      demand_ewma_half_life=float(
-                          tp.get("demand_ewma_half_life", 0.0)),
-                      target_cap=float(tp.get("target_cap", 0.0)),
+                     demand_ewma_half_life=float(
+                         tp.get("demand_ewma_half_life", 0.0)),
+                     demand_ewma_min_blocks=int(
+                         tp.get("demand_ewma_min_blocks", 5)),
+                     target_cap=float(tp.get("target_cap", 0.0)),
                       min_reserve_wei=int(tp.get("min_reserve_wei", 0)),
                       surplus_epsilon=float(tp.get("surplus_epsilon",
                                                    tp["epsilon"])))

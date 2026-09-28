@@ -8,6 +8,17 @@ def _agent(**kw):
     return a
 
 
+def test_ewma_observation_window_is_configurable():
+    a = _agent(policy=TdrAgent.POLICY_TOPUP,
+               demand_ewma_half_life=4,
+               demand_ewma_min_blocks=3)
+    a.observe(1, 0, 100)
+    a.observe(2, 0, 100)
+    assert a._req_ready(2) is False
+    a.observe(3, 0, 100)
+    assert a._req_ready(3) is True
+
+
 def _prime(a, h_first=1):
     """喂满一个窗口的需求 + 失衡快照：shard2 大额超配（相对 τ）。"""
     a.observe(h_first, 0, 100)          # 需求集中在 0/1 → τ 偏向 0,1

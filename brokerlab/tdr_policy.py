@@ -99,6 +99,8 @@ class EwmaDemand:
                  min_blocks: int = 5) -> None:
         if half_life_blocks <= 0:
             raise ValueError("half_life_blocks must be > 0")
+        if min_blocks <= 0:
+            raise ValueError("min_blocks must be > 0")
         self.half_life = float(half_life_blocks)
         self.min_blocks = int(min_blocks)      # 冷启动：至少见过几块才 ready
         self._rate: t.Dict[int, float] = {}    # shard → 指数衰减需求累计量

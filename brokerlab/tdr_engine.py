@@ -43,6 +43,7 @@ class TdrAgent:
                  base_lead_blocks: float = 6.0, base_safety: float = 2.0,
                  base_floor_frac: float = 0.05,
                  demand_ewma_half_life: float = 0.0,
+                 demand_ewma_min_blocks: int = 5,
                  target_cap: float = 0.0,
                  min_reserve_wei: int = 0,
                  surplus_epsilon: t.Optional[float] = None) -> None:
@@ -52,7 +53,7 @@ class TdrAgent:
         self.window = DemandWindow(window_blocks)
         self.ewma = EwmaDemand(half_life_blocks=float(demand_ewma_half_life)
                                if demand_ewma_half_life > 0 else 20.0,
-                               min_blocks=5)
+                               min_blocks=int(demand_ewma_min_blocks))
         self.epsilon = float(epsilon)
         self.q_min = float(q_min)
         self.chi_blocks = int(chi_blocks)

@@ -64,6 +64,7 @@ def base_state(cfg) -> dict[str, Any]:
         "ewma_epsilon": float(e["exp010_ewma_epsilon"]),
         "ewma_chi_blocks": int(e["exp010_ewma_chi_blocks"]),
         "ewma_half_life": float(e["exp010_ewma_half_life"]),
+        "ewma_min_blocks": int(e.get("exp010_ewma_min_blocks", 5)),
         "ewma_q_min": float(e["exp010_ewma_q_min"]),
     }
 
@@ -77,6 +78,7 @@ def apply_target(state: dict[str, Any], overrides: dict[str, Any],
         "arm.ewma.epsilon": "ewma_epsilon",
         "arm.ewma.chi_blocks": "ewma_chi_blocks",
         "arm.ewma.half_life": "ewma_half_life",
+        "arm.ewma.min_blocks": "ewma_min_blocks",
         "arm.ewma.q_min": "ewma_q_min",
         "arm.hard.epsilon": "hard_epsilon",
         "arm.hard.chi_blocks": "hard_chi_blocks",
@@ -241,6 +243,7 @@ def common_overrides(trial: Trial, profile: dict[str, Any], route_seed: int,
         "exp.route_seed": int(route_seed),
         # Fixed offered load: it is deliberately not a search dimension.
         "exp.rate": 120,
+        "exp.tdr_ewma_min_blocks": int(trial.state.get("ewma_min_blocks", 5)),
         "exp.balances_eth": trial.state["balance_eth"],
         "broker.initial_balance_eth": trial.state["balance_eth"],
     })
@@ -251,6 +254,14 @@ def arm_cache_key(token: str, overrides: dict[str, Any], fingerprint: str) -> st
     payload = {"fingerprint": fingerprint, "arm": token, "overrides": overrides}
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()[:20]
+
+
+def overrides_for_role(overrides: dict[str, Any], role: str) -> dict[str, Any]:
+    """Drop EWMA-only settings from comparator cache keys and child configs."""
+    result = dict(overrides)
+    if role != "ewma_topup":
+        result.pop("exp.tdr_ewma_min_blocks", None)
+    return result
 
 
 def _summary_complete(path: Path) -> bool:
@@ -274,7 +285,10 @@ def _run_cached_arm(run_dir: Path, config_path: Path, token: str,
         print(f"  cache hit  {key}  {_tag(token)}", flush=True)
         return cached_summary, 0, True
 
-    attempt_root = cache_dir / "attempts" / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    # Keep this path deliberately short.  exp003 appends another timestamp and
+    # the full arm name; the former layout could exceed Windows' directory
+    # length limit before an EWMA arm started running.
+    attempt_root = run_dir / "a" / key / datetime.now().strftime("%H%M%S_%f")
     attempt_root.mkdir(parents=True, exist_ok=True)
     arm_overrides = dict(overrides)
     arm_overrides["exp.arms"] = token
@@ -591,6 +605,7 @@ def aggregate_records(run_dir: Path, trials: list[Trial]) -> None:
 PARAMETER_ROLE = {
     "epsilon": "ewma_topup",
     "ewma_half_life": "ewma_topup",
+    "ewma_min_blocks": "ewma_topup",
     "ewma_q_min": "ewma_topup",
     "broker_balance_eth": "ewma_topup",
     "window_blocks": "hard_topup",
@@ -856,8 +871,9 @@ def run_trial(run_dir: Path, config_path: Path, trial: Trial,
         returncodes: list[int] = []
         hits = 0
         for role, token in tokens.items():
+            arm_overrides = overrides_for_role(overrides, role)
             source, rc, hit = _run_cached_arm(
-                run_dir, config_path, token, overrides, fp)
+                run_dir, config_path, token, arm_overrides, fp)
             returncodes.append(rc)
             hits += int(hit)
             if source is None or not _summary_complete(source):
@@ -900,8 +916,8 @@ def estimate_arm_runs(run_dir: Path, trials: list[Trial], profile: dict[str, Any
         for rep in range(1, replicates + 1):
             route_seed = 7 + (rep - 1) * 10
             overrides = common_overrides(trial, profile, route_seed, cli_overrides)
-            for token in arm_tokens(trial.state).values():
-                key = arm_cache_key(token, overrides, fingerprint)
+            for role, token in arm_tokens(trial.state).items():
+                key = arm_cache_key(token, overrides_for_role(overrides, role), fingerprint)
                 if key not in keys:
                     keys.add(key)
                     if not _summary_complete(run_dir / "arm_cache" / key / "summary.json"):
@@ -921,6 +937,8 @@ def main() -> int:
     ap.add_argument("--replicates", type=int)
     ap.add_argument("--max-trials", type=int)
     ap.add_argument("--resume", type=Path)
+    ap.add_argument("--output-root", type=Path,
+                    help="root for new runs; defaults to this experiment's out directory")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-plot", action="store_true")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
@@ -956,7 +974,8 @@ def main() -> int:
         replicates = args.replicates or int(profile["replicates"])
         all_trials = build_trials(cfg, space, profile_name, args.stage, only)
         stage_name = args.stage
-        run_dir = HERE / "out" / datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_root = args.output_root.resolve() if args.output_root else HERE / "out"
+        run_dir = output_root / datetime.now().strftime("%Y%m%d_%H%M%S")
     pending = []
     for trial in all_trials:
         status_file = run_dir / "trials" / trial.trial_id / "status.json"

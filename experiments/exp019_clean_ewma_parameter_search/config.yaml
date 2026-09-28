@@ -1,0 +1,98 @@
+label: exp019_clean_ewma_parameter_search
+
+exp:
+  rate: 120
+  ctx_per_broker: 200               # 50 brokers x 200 = 10,000 CTX per candidate
+  pool_scan: 200000
+  group_cap_mult: 2.0
+  seed: 42
+  route_seed: 7
+  balances_eth: 150
+  match_ctrl_bytes: 100
+  sender_window: 8
+  max_backlog: 30000
+  loop_sleep_s: 0.002
+  release_poll_s: 0.02
+  dispatch_per_tick: 500
+
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.1
+  tdr_q_min: 0.10
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_offset_spread_blocks: 5
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 1.3
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0
+  tdr_ewma_min_blocks: 5
+  tdr_target_cap: 0.0
+  tdr_min_reserve_eth: 0.0
+  tdr_surplus_epsilon: 0.10
+
+  arms: "plain@150,valve@150@1.3,tdr@150@@0.1,topup@150@@0.1@10,topup@150@@0.95@10@20@0.1"
+
+  max_inflight: 64
+  poll_s: 0.02
+  probe_s: 0.1
+  probe_first_s: 0.6
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  drain_tail_s: 900
+  coordinator_mint_budget_eth_per_shard: 2000000
+  rss_cap_mb: 9000
+
+  exp010_profile: search
+  exp010_replicates: 1
+  exp010_proportional_epsilon: 0.10
+  exp010_hard_epsilon: 0.10
+  exp010_hard_chi_blocks: 10
+  exp010_ewma_epsilon: 0.95
+  exp010_ewma_chi_blocks: 10
+  exp010_ewma_half_life: 20
+  exp010_ewma_min_blocks: 5
+  exp010_ewma_q_min: 0.10
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16
+  base_port: 10600
+  chain_id_base: 54000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: trace/ETH_cleaned.csv
+  allow_contract_endpoints: false
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false
+
+tdr:
+  enabled: true
+
+output:
+  results_root: results
