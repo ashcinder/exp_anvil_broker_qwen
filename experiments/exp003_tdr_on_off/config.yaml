@@ -1,0 +1,97 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp003 · TDR 开/关对照 —— M4 验收实验
+# 同一条 40000 笔定向流、同一个路由 coordinator（exp007 基础设施），
+# 两个方案各跑一遍：plain = 无 TDR（dst 耗尽→relay 改判，exp007 已证），
+#                tdr   = 每 broker 挂 TdrDynamicEngine，钱包自主把 src 侧
+#                        堆积的钱经 burn/mint 搬回 dst（真实交易，无 setBalance）。
+# 看什么：TDR 是否压低改判率与 relay 量、代价多少（吞吐/延迟/代铸负载）、
+#         全程守恒是否依然成立。设计/判据见本目录 README.md。
+#
+# 对齐 exp008 的正式负载档：40000 笔、16 分片、50 broker、200 用户、150 ETH。
+# exp003 原验证档（仅作记录）：rate=80, ctx_per_broker=200,
+# pool_scan=30000, max_backlog=6000, num_shards=4。
+# 本实验仍只跑 plain/tdr 两臂；不复制 exp008 的五方案消融设计。
+# ══════════════════════════════════════════════════════════════════════════
+label: exp003_tdr_on_off
+
+exp:
+  rate: 120                          # 原值=80；对齐 exp008 的正式注入速率
+  ctx_per_broker: 800                # 原值=200；N = 50 × 800 = 40000，对齐 exp008
+  pool_scan: 200000                  # 原值=30000；为 40000 笔负载扫描足够的 trace
+  group_cap_mult: 2.0
+  seed: 42                           # 负载/装箱种子（与 exp006/007 同流）
+  route_seed: 7                      # 匹配层种子；与 exp008 一致
+  balances_eth: 150                  # 每 broker 每分片垫资；与 exp008 正式档一致
+  match_ctrl_bytes: 100              # broker 跨片控制消息的声明字节数；relay 从链上回执实测
+  sender_window: 2                   # 与 exp008 一致
+  max_backlog: 20000                 # 原值=6000；随 N=40000 放大，对齐 exp008
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  # —— TDR 参数（仅 tdr 方案生效）——
+  tdr_window_blocks: 20              # w：需求滑窗（块）
+  tdr_epsilon: 0.10                  # ε：死带触发阈值（占 τ 比例）
+  tdr_q_min: 0.10                    # q_min：每分片目标不低于 ρ·q_min/n 的地板
+  tdr_chi_blocks: 10                 # χ：同 broker 两事件最小块间隔
+  tdr_timeout_blocks: 20             # 事件段超时（块）→ lost_in_transit，不重试
+  tdr_trigger_mode: excess_only      # 触发语义（excess_only 随 Go | two_sided 手稿）
+  tdr_offset_blocks: 3               # 冷启动错峰（按 broker 索引偏移，防同步风暴）
+  tdr_block_poll_s: 1.0              # 引擎块高估计轮询间隔
+  tdr_cap_mult: 2.0                  # 傻瓜水位阀（engine=valve）触发水位 = init×此值
+  tdr_base_lead_blocks: 6.0          # base-stock：补货在途块数（缓冲线 = rate×lead）
+  tdr_base_safety: 2.0               # base-stock：安全系数
+  tdr_base_floor_frac: 0.05          # base-stock：地板 = 可用总额的此比例/分片
+  tdr_ewma_half_life: 0.0            # >0 用 EWMA 平滑需求（半衰期块数）；0=硬窗口（原语义）
+  # —— 引擎公共 ——
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  drain_tail_s: 420
+  coordinator_mint_budget_eth_per_shard: 2000000  # 技术签发预算，不随 trace 总额缩小。
+                                     # TDR 循环搬运会反复 mint（每次 burn≡mint 配对），预算不是
+                                     # 一次性流量上限；耗尽时 coordinator 显式拒答（不崩），
+                                     # 引擎记 lost 台账并自然收敛。budget_denied 计数进报表。
+  arms: "plain,tdr"                  # 要跑的方案（单臂调试用）
+  rss_cap_mb: 9000
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16                    # 原值=4；对齐 exp008 的 16 分片正式环境
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false
+
+tdr:
+  enabled: true                      # 占位说明：本实验的两臂开关在 exp 层（run.py 决定引擎类型）
+
+output:
+  results_root: results

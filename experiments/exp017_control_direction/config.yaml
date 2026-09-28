@@ -1,0 +1,83 @@
+label: exp017_control_direction
+exp:
+  sessions: 1
+  candidate_count: 20000
+  snapshot_dir: trace/directional_source_snapshot
+  ctx_per_broker: 200  # 50 brokers * 200 = 10000 CTX per method per scenario.
+  target_shard: 0
+  control_probabilities: [0.0, 0.25, 0.5, 0.75, 1.0]
+  control_seed: 20260927  # Independent of strategy and route seed; frozen per transaction.
+  audit_window_blocks: 20
+  rate: 120
+  seed: 42
+  route_seed: 7
+  balances_eth: 0.5
+  valve_threshold: 1.3
+  ewma_epsilon: 0.95
+  ewma_half_life: 20
+  hard_epsilon: 0.95  # Matched to EWMA epsilon to isolate the estimator comparison.
+  sender_window: 8
+  max_backlog: 20000
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.1
+  tdr_q_min: 0.1  # Dimensionless target-floor coefficient; NOT minimum transfer ETH.
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_offset_spread_blocks: 5
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 1.3
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0
+  tdr_target_cap: 0.0
+  tdr_min_reserve_eth: 0.0
+  max_inflight: 64
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  drain_tail_s: 420
+  coordinator_mint_budget_eth_per_shard: 2000000
+  match_ctrl_bytes: 100
+  rss_cap_mb: 9000
+  collect_block_capacity: true
+chain:
+  anvil_bin: null
+  mnemonic: myth like bonus scare over problem client lizard pioneer submit female collect
+  num_shards: 16
+  base_port: 13100
+  chain_id_base: 55000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+broker:
+  initial_balance_eth: 0.5
+  relay_mint_budget_eth: 1000
+traffic:
+  kind: real_csv
+  real_csv_path: trace/ethereum_202509.csv
+  allow_contract_endpoints: true
+  value_floor_eth: 0.05
+  value_cap_eth: 5.0
+  max_extract: 50
+tdr:
+  enabled: true
+b2e:
+  enabled: false
+output:
+  results_root: results

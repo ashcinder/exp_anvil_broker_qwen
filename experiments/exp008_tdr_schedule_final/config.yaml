@@ -1,0 +1,97 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp008 · 定稿调度方案正式评估 —— 论文数据生产
+# 复用 exp003 管线（五方案同场），多场重复后聚合出跨场统计。
+# 定稿方案：topup + EWMA(hl=20)、ε=0.95、q_min=0.10、χ=10。
+# 探索史：exp003/EXPLORATION_log_CN.md；方案全文：同目录 DESIGN_topup_ewma_CN.md。
+# ══════════════════════════════════════════════════════════════════════════
+label: exp008_tdr_schedule_final
+
+exp:
+  # —— exp008 自有 ——
+  exp008_sessions: 1                 # 单场验证0.05～5 ETH金额区间；五方案共享路由种子7
+  # —— 负载与速率（正式档标定，20260908/09）——
+  rate: 120                          # 本实验 exp003 管线历史完整跑通的速率；exp007 动态路由在 120 会积压中止，不能混同
+  ctx_per_broker: 2000               # N = 50 × 2000 = 100000
+  pool_scan: 200000                  # 可用池约 16.7 万笔，足够保序选取 10 万笔
+  group_cap_mult: 2.0
+  seed: 42
+  route_seed: 7
+  balances_eth: 0.5                  # 本轮仅修改余额及金额过滤范围
+  match_ctrl_bytes: 100              # broker 控制消息声明值；relay 由 CSV 的 RLP+回执实测字节计算
+  sender_window: 2
+  max_backlog: 20000                 # 积压安全阈值，不代表丢失容忍量；超限后该场不能作为正式结果
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  # —— TDR 参数（定稿）——
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.1                   # 基线 proportional 沿用论文值
+  tdr_q_min: 0.10                    # 实测为冷分片保险，勿设 0（档案 §18）
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0            # 全局默认硬窗口；定稿方案由 token 带 hl=20
+  # —— 五方案同场（token 语法 name@fund@cap@eps@chi@hl@qmin）——
+  arms: "plain@0.5,valve@0.5@1.3,tdr@0.5@@0.1,topup@0.5@@0.1,topup@0.5@@0.95@@20"
+  # —— 引擎公共 ——
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  drain_tail_s: 420
+  # 技术签发账户预算必须独立于本批 trace 总额；避免 TDR 高周转耗尽基础设施资金。
+  coordinator_mint_budget_eth_per_shard: 2000000
+  exp008_min_relay_reduction: 0.20
+  exp008_max_throughput_loss: 0.15
+  rss_cap_mb: 9000
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 0.5
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  # 2026-09-24 导入的新主网交易记录；相对路径按项目根目录解析。
+  real_csv_path: trace/ethereum_202509.csv
+  # 新文件以合约交互为主；只取地址/方向/ETH value 作为分片负载代理，
+  # 不重放 calldata 或原合约状态。其他实验默认仍为 false。
+  allow_contract_endpoints: true
+  value_floor_eth: 0.05
+  value_cap_eth: 5.0
+  max_extract: 50
+
+b2e:
+  enabled: false
+
+tdr:
+  enabled: true                      # 占位说明：方案开关在 exp.arms（exp003 管线）
+
+output:
+  results_root: results

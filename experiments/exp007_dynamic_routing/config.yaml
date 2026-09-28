@@ -1,0 +1,85 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp007 · 动态路由（M3 核心上线）—— 静态指派 vs 实时匹配，同会话对照
+# coordinator 按块释放到达 → 用余额估计表实时挑 broker → 队列投递 →
+# broker 本地账本终审（不够则自走 relay）。兼任 M3 里程碑验收。
+# 正式规模向 exp008 对齐：40000 笔、16 分片、50 broker、
+# 150 ETH/broker/shard；本次按用户要求恢复为 120 CTX/逻辑块。
+# 旧参数留档：上一版 rates="30"、static_rates="30"、window_probe_rate=30；
+# 更早一版为 rates="70"、static_rates="70"、window_probe_rate=70。
+# Downloads 旧源码配置留档：rates="25,75,150"、static_rates="75,150"、
+# ctx_per_broker=200、pool_scan=30000、window_probe_rate=80、num_shards=4、
+# refresh_workers=8、max_backlog=6000、drain_tail_s=300。
+# 20260921 的 dyn_120 只派发 18955/40000、失败 87、backlog=20045 后中止。
+# 静态、动态和窗口探针使用同一速率，主对照只改变“静态指派/动态路由”。
+# 判据/设计见本目录 README.md。覆盖：
+#   python run.py --set exp.rates=25 --set exp.static_rates= --set exp.ctx_per_broker=4  # 冒烟
+# ══════════════════════════════════════════════════════════════════════════
+label: exp007_dynamic_routing
+
+exp:
+  rates: "120"                 # 动态主臂；按用户要求恢复为 120
+  static_rates: "120"          # 静态对照同步使用 120，保证同速率比较
+  ctx_per_broker: 800          # N = 50 × 800 = 40000 笔（与 exp008 对齐）
+  pool_scan: 200000            # 为 40000 笔负载扫描足够的真实 trace
+  group_cap_mult: 2.0          # 巨鲸组过滤上限 = 此值 × 组均值（同 exp006）
+  seed: 42                     # 负载构造种子（与 exp006 一致 ⇒ 同一股流可跨实验对照）
+  route_seed: 7                # 匹配层 RNG 种子（独立于装箱；决定"无候选随机指派"的落点）
+  balances_eth: 150            # 每 broker 每分片垫资（与 exp006 同档：dst 会耗尽 → 触发回退）
+  sender_window: 2             # 每个 (sender,src) 同时在途 ≤此值；取 2 避免 window=1
+                               # 成为结构性并发上限，nonce 缺号只会短暂 stall（队列不丢）。
+                               # window=1 作 H-D3 探针臂（严格序列化下界）对照。
+  window_probe_rate: 120       # H-D3 与主臂同速率，只改变 sender_window
+  window_probe: 1              # 探针臂窗口（=严格序列化，展示 window 作为旋钮的下界）
+  loop_sleep_s: 0.005          # 协调器主循环 tick 间隔（块高另有 release_poll_s 节流）
+  dispatch_per_tick: 200       # coordinator 每轮最多派发的 CTX 数；恢复后的 run.py 现从本项读取
+  max_inflight: 24             # 引擎在途段上限（同 exp006）
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120         # coordinator 代铸段超时
+  engine_timeout_s: 150        # 引擎单段超时
+  release_poll_s: 0.15         # 块高轮询间隔（到达与刷新的时钟源）
+  refresh_every_blocks: 1      # 估计表全量 RPC 刷新的块间隔（50×16=800 RPC/次）
+  refresh_workers: 32          # 保持约 25 个余额读取/读手；每线程使用独立 Web3 连接
+  max_backlog: 20000           # 安全中止阈值；不能靠调大它来掩盖注入 > 处理能力
+  t_ready_budget_s: 180        # coordinator + 50 引擎冷启动预算
+  drain_tail_s: 420            # 正式负载的排空预算（与 exp008 对齐）
+  rss_cap_mb: 9000
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false               # 动态路由基准不掺手续费变量（B2E 已在 exp004 立账）
+
+tdr:
+  enabled: false               # 本实验是 TDR 的承载层；策略本体在 M4
+
+output:
+  results_root: results

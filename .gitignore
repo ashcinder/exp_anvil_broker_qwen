@@ -1,0 +1,25 @@
+# 原始数据与实验产物不进入 Git（大型 trace 请在机器之间单独传输）
+trace/
+results/
+exp_figure_origin/
+exp_figure_origin_qwen/
+**/out*/
+**/validation*/
+**/backups/
+**/calibration/
+**/figs/
+
+# 临时文件、缓存与本地环境
+.codex_backups/
+.pytest_cache/
+.pytest_tmp*/
+tmp/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+.venv-win/
+.vscode/
+
+# 本地日志
+*.log

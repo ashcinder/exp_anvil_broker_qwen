@@ -1,0 +1,79 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp001 · relay vs broker 机制对比 —— 实验配置（参数唯一来源，缺键 run.py 即报错）
+# 临时覆盖任意项：python run.py --set exp.pairs=20 --set chain.block_time_s=2
+# ══════════════════════════════════════════════════════════════════════════
+label: exp001_relay_vs_broker    # 实验标识：写入 summary.json 参数快照、日志头
+
+exp:                             # ── 实验专属参数（brokerlab 库不认识，run.py 消费）──
+  pairs: 50                      # 保持 exp001 原值；每行分别跑 broker/relay 两条路径，
+                                 # 因此总执行 100 笔 CTX。若向 exp008 靠拢可改为 40000，
+                                 # 但阻塞式串行执行预计需要数十小时。
+  match_ctrl_bytes: 100          # broker 路径每笔 CTX 的跨片【控制消息】字节数。
+                                 # 本实验唯一的模型常数（relay 侧账单全部实测）。
+                                 # 含义：匹配层把 Θ_raw 转给 broker 所需传输的量；
+                                 # 高估它只会让 broker 显得更贵，结论方向安全
+  seed: 42                       # static_broker 匹配的种子（brokerlab/matching.py）。
+                                 # eligible=目的余额≥v 者，均匀随机选一个。
+                                 # num_brokers=1 时恒选 0 号（与旧版逐位一致）；
+                                 # scale.num_brokers>1 才真正分流。固定种子 ⇒ 选择序列可复现
+
+chain:                           # ── Anvil 链集群 ──
+  anvil_bin: null                # anvil 可执行文件；null → 自动按 ~/.foundry/bin/anvil → PATH 发现；
+                                 # 实验室机器如装他处，填绝对路径即可（doctor 会检查）
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+                                 # HD 助记词（BIP-39 标准测试短语，无任何真实资产）。
+                                 # 所有分片共用同一助记词 ⇒ 各分片账户"同名不同账"：
+                                 # 同一地址在每个分片有独立的余额与 nonce —— 这正是
+                                 # BrokerChain 的 broker 子账户模型（见 README 设计说明）
+  num_shards: 2                  # 保持 exp001 原值；若向 exp008 靠拢可改为 16。
+                                 # 分片数 = 并起的 anvil 节点数（每分片一条独立链）
+  base_port: 8600                # 首分片 RPC 端口，分片 i 用 base+i。启动前逐端口 bind 探测，
+                                 # 真占用才报错（活跃监听），TIME_WAIT 不误报（回归测试在案）
+  chain_id_base: 43000           # 分片 i 的 chainId = base+i。各分片独立 chainId 使得
+                                 # 一笔已签名交易无法被重放到别的分片（EVM 签名绑定 chainId）
+  block_time_s: 1                # 固定出块间隔（秒）。一切实验时间量按【块索引】计，
+                                 # 块时长只影响墙钟耗时，不影响逻辑结果 → 实验室机器跑
+                                 # 12s 档与本机 1s 档，到达轨迹与判据不变
+  gas_limit: 30000000            # 单块 gas 上限。本实验每笔仅 21000 gas、块内远不饱和，
+                                 # 不构成约束；容量类实验（full 档 + TDR 开销）才需要调它
+  num_funded_accounts: 260       # 保持 exp001 原值，覆盖当前最大用户索引 249；
+                                 # 若使用 exp008 的 50 brokers + 200 users，应改为 450
+  accounts_balance_eth: 0        # 预派生账户的初始余额。刻意置 0：所有人白手起家，
+                                 # 由 setup 阶段 setBalance 显式充值 → 守恒基线绝对干净，
+                                 # 任何非零值都会污染差分核对
+
+scale:                           # ── 角色索引段（同 mnemonic 派生，索引不重叠，加载时校验）──
+  coordinator_index: 1           # 签发账户（代表 relay/铸币机制）的账户索引
+  broker_base_index: 100         # broker b 的账户索引 = 此值 + b（当前仅使用索引 100）
+  num_brokers: 1                 # 保持 exp001 原值；若向 exp008 靠拢可改为 50
+  user_base_index: 200           # 用户账户索引起点（真实地址→账户：base + int(addr,16)%num_users，
+                                 # 映射规则与旧三代保持一致，历史 trace 分析可衔接）
+  num_users: 50                  # 保持 exp001 原值；若向 exp008 靠拢可改为 200
+
+broker:                          # ── 流动性与预算 ──
+  initial_balance_eth: 150       # 原值：100；本次仅此规模参数向 exp008 对齐。
+                                 # 每个 broker 在每个分片的初始余额为 150 ETH。
+                                 # run.py 按此值真实初始化；若不足会产生 no_qualified 并使实验失败
+  relay_mint_budget_eth: 1000    # coordinator 每分片余额 = 【铸造预算】，不是流动性：
+                                 # burn-and-mint 语义下 mint 腿由它执行（真实转账，代表目的
+                                 # 分片委员会铸币）；Σ支出≡Σ销毁额，由全局守恒检查核验。
+                                 # 可耗尽=配置错误，不构成协议结果
+
+traffic:                         # ── 数据源 ──
+  kind: real_csv                 # 负载来源：real_csv=ETH 主网真实交易（当前唯一实现；
+                                 # 合成定向流生成器随 M3 接入）
+  real_csv_path: null            # null → <项目根>/trace/ETH_cleaned.csv；
+                                 # 相对路径也按项目根解析 → 整个项目可搬家/迁移机器零改动
+  value_floor_eth: 0.01          # 金额下限：滤掉 dust 转账（大量 0 值会稀释延迟/通信样本意义）
+  value_cap_eth: 10.0            # 金额上限：滤掉主网清算巨鲸转账——一笔 >10 ETH 就足以单独
+                                 # 抽干 broker，会把"机制对比"实验污染成流动性事故现场
+  max_extract: 50                # （本实验不使用——加载量由 exp.pairs 控制；保留字段兼容
+                                 # demo 配置结构。M2+ 接 broker 池服务时用）
+
+tdr:                             # ── TDR 开关（本实验为对照组语义：不启用）──
+  enabled: false                 # exp001 只比 relay/broker 机制本身；
+                                 # TDR 的 before/after 在 M4 的 exp003 打开
+
+output:
+  results_root: results          # （本实验产物写在自己的 out/<ts>/ 下，不受此字段影响；
+                                 # 保留给 python -m brokerlab demo 使用）

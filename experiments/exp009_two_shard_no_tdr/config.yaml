@@ -1,0 +1,76 @@
+label: exp009_two_shard_tdr_toggle
+
+exp:
+  count: 150
+  balances_eth: 150
+  pool_scan: 2000
+  match_ctrl_bytes: 100
+  seed: 42
+  route_seed: 7
+  rate: 2                              # 小规模双分片档；给 TDR 足够时间在负载进行中触发
+  sender_window: 2
+  max_backlog: 500
+  loop_sleep_s: 0.01
+  release_poll_s: 0.15
+  dispatch_per_tick: 20
+  max_inflight: 12
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 60
+  drain_tail_s: 180
+  coordinator_mint_budget_eth_per_shard: 2000000
+  rss_cap_mb: 2000
+  tdr_window_blocks: 5                 # 150 笔短负载窗口；避免到全部交易结束后才就绪
+  tdr_epsilon: 0.10
+  tdr_q_min: 0.10
+  tdr_chi_blocks: 5
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 0
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0
+
+chain:
+  anvil_bin: "C:/Users/hzy/.foundry/bin/anvil.exe"
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 2
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 260
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 1
+  user_base_index: 200
+  num_users: 50
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false
+
+tdr:
+  enabled: false                       # false=关闭 TDR；true=开启 proportional TDR
+
+output:
+  results_root: results

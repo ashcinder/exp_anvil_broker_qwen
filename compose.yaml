@@ -1,0 +1,20 @@
+services:
+  brokerlab:
+    image: starshell-dev:1.0.2
+    container_name: brokerlab-dev
+    hostname: brokerlab-dev
+    restart: unless-stopped
+    init: true
+    ports:
+      - "22:22"
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: ["/usr/sbin/sshd", "-D", "-e"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x sshd >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+

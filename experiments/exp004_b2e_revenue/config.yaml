@@ -1,0 +1,69 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp004 · B2E 手续费收入与守恒恒等式（对照手稿 §V break-even 的收入端）
+# 两臂同流对照：b2e.off（现状，逐字节旧路径）vs b2e.on（βF 进 broker、(1−β)F 烧掉）。
+# 参数唯一来源=本文件；缺键 run.py 即报错。覆盖：
+#   python run.py --set exp.count=40 --set exp.strategies=off
+#
+# 对齐 exp008 的资金基准：每 broker 每分片 150 ETH。本实验逐笔串行，
+# 不启用 exp008 的 40000 笔、16 分片、50 broker 并行规模。为保留 Relay
+# 费用分支，将流量提到 250 笔：实测合计约 735.45 ETH > 600 ETH 资金池。
+# exp008 参考档（仅作记录）：count=40000, pool_scan=200000, num_shards=16,
+# num_funded_accounts=450, num_brokers=50, num_users=200。
+# ══════════════════════════════════════════════════════════════════════════
+label: exp004_b2e_revenue
+
+exp:
+  strategies: "off,on"               # 要跑的臂（逗号分隔）；两臂用同一 kept 流、同一 seed ⇒ 逐笔可比
+  count: 250                         # 原值=60；串行试验不用 exp008 的 40000。
+                                     # 250 笔约 735.45 ETH，可耗过 600 ETH 目的池并触发 Relay
+  pool_scan: 2000                    # 原值=2000；exp008 参考值=200000。
+                                     # 当前可得 1046 笔多数方向流，足够提取 250 笔
+  balances_eth: 150                  # 原值=30；对齐 exp008 的 150 ETH/broker/shard，
+                                     # 4 broker ⇒ 目的分片初始资金池 600 ETH
+  seed: 42                           # static_broker 匹配种子；两臂共用 ⇒ 选择序列一致
+
+chain:                               # ── Anvil 集群（与 exp001/002 同构）──
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 2                      # 原值=2，exp008 参考值=16；串行定向流保留 2
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 260           # 原值=260，exp008 参考值=450
+  accounts_balance_eth: 0
+
+scale:                               # ── 角色索引段 ──
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 4                     # >1 ⇒ static_broker 均匀分流真正生效，
+                                     # 原值=4，exp008 参考值=50；保留 4 用于逐 broker 收入审计
+                                     # per-broker 收入表才测得到"可交换性"（PLAN_b2e §1.5）
+  user_base_index: 200
+  num_users: 50                      # 原值=50，exp008 参考值=200
+
+broker:
+  initial_balance_eth: 150           # 原值=100；对齐 exp008。实际充值由 exp.balances_eth 控制
+  relay_mint_budget_eth: 1000        # coordinator 铸造预算基准（脚本按需上浮）
+
+b2e:                                 # ── B2E 机制参数（on 臂生效；off 臂强制关闭）──
+  enabled: true                      # 本文件里写 true=on 臂的取值；off 臂由 run.py 强制置 false
+  fee_share: 0.10                    # β：broker 抽取比例（"21000 gas 的 10%"）
+  gas_units_per_ctx: 21000           # F 的成本基数（一笔普通转账的 gas）
+  ref_gas_price_wei: 100000000000    # 名义 gas 单价 100 gwei（默认 1 gwei 收入太小不可读；
+                                     # 提档已在 README 声明——机制与单价无关）
+                                     # ⇒ F = 21000×100 gwei = 2.1e-3 ETH/笔；βF = 2.1e-4 ETH
+  charges_rebalancing: false         # TDR 重平衡交易是否付费（M4 的成本端 μ，本实验无 TDR）
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50                    # （不使用；注入量 = exp.count）
+
+tdr:
+  enabled: false
+
+output:
+  results_root: results

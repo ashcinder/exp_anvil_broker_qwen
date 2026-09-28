@@ -1,0 +1,137 @@
+# Search around a calibrated 1,000-CTX pressure baseline. `smoke_values` keep
+# validation short; `values` are used by search/broad/full profiles.
+profiles:
+  smoke:
+    ctx_per_broker: 4
+    replicates: 1
+    use_smoke_values: true
+    include_grids: true
+  search:
+    ctx_per_broker: 20
+    replicates: 1
+    use_smoke_values: false
+    include_grids: true
+  broad:
+    # Backward-compatible alias for the 1,000-CTX search workload.
+    ctx_per_broker: 20
+    replicates: 1
+    use_smoke_values: false
+    include_grids: true
+  full:
+    ctx_per_broker: 800
+    replicates: 2
+    use_smoke_values: false
+    include_grids: true
+
+dimensions:
+  epsilon:
+    label: "EWMA deficit epsilon"
+    target: arm.ewma.epsilon
+    values: [0.05, 0.10, 0.20, 0.35, 0.50, 0.65, 0.75, 0.85, 0.95]
+    smoke_values: [0.20, 0.50, 0.85]
+  ewma_half_life:
+    label: "EWMA half-life (blocks)"
+    target: arm.ewma.half_life
+    values: [1, 2, 3, 4, 6, 8, 12, 16]
+    smoke_values: [2, 4, 8]
+  ewma_q_min:
+    label: "EWMA minimum allocation ratio"
+    target: arm.ewma.q_min
+    values: [0.20, 0.30, 0.40, 0.50, 0.60, 0.80]
+    smoke_values: [0.20, 0.40, 0.80]
+  broker_balance_eth:
+    label: "Initial balance (ETH/shard)"
+    target: arm.all.balance_eth
+    values: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0, 5.0]
+    smoke_values: [0.75, 1.0, 2.0]
+  window_blocks:
+    label: "Hard demand window (blocks)"
+    target: exp.tdr_window_blocks
+    values: [2, 3, 4, 5, 6, 8, 10, 12]
+    smoke_values: [2, 4, 8]
+  valve_cap_mult:
+    label: "Valve threshold multiplier"
+    target: arm.valve.cap_mult
+    values: [1.05, 1.10, 1.20, 1.30, 1.50, 1.75, 2.00]
+    smoke_values: [1.10, 1.30, 1.75]
+  proportional_epsilon:
+    label: "Proportional TDR epsilon"
+    target: arm.proportional.epsilon
+    values: [0.05, 0.10, 0.20, 0.35, 0.50, 0.70, 0.85]
+    smoke_values: [0.05, 0.20, 0.70]
+  hard_epsilon:
+    label: "Hard-window topup epsilon"
+    target: arm.hard.epsilon
+    values: [0.05, 0.10, 0.20, 0.35, 0.50, 0.70, 0.85]
+    smoke_values: [0.05, 0.20, 0.70]
+  value_floor_eth:
+    label: "Transaction value minimum (ETH)"
+    target: traffic.value_floor_eth
+    values: [0.05, 0.10, 0.20, 0.25, 0.35, 0.50, 0.75, 1.00]
+    smoke_values: [0.10, 0.25, 0.50]
+  value_cap_eth:
+    label: "Transaction value maximum/cap (ETH)"
+    target: traffic.value_cap_eth
+    values: [1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
+    smoke_values: [1.5, 3.0, 4.0]
+
+grids:
+  epsilon_x_half_life:
+    x_target: arm.ewma.epsilon
+    x_label: "EWMA deficit epsilon"
+    x_values: [0.20, 0.35, 0.50, 0.65, 0.75, 0.85]
+    y_target: arm.ewma.half_life
+    y_label: "EWMA half-life (blocks)"
+    y_values: [1, 2, 4, 6, 8, 12]
+  epsilon_x_q_min:
+    x_target: arm.ewma.epsilon
+    x_label: "EWMA deficit epsilon"
+    x_values: [0.20, 0.35, 0.50, 0.65, 0.75, 0.85]
+    y_target: arm.ewma.q_min
+    y_label: "Minimum allocation ratio"
+    y_values: [0.20, 0.30, 0.40, 0.60, 0.80]
+  balance_x_valve_threshold:
+    x_target: arm.all.balance_eth
+    x_label: "Initial balance (ETH/shard)"
+    x_values: [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]
+    y_target: arm.valve.cap_mult
+    y_label: "Valve threshold multiplier"
+    y_values: [1.05, 1.10, 1.20, 1.30, 1.50, 1.75]
+  value_floor_x_cap:
+    x_target: traffic.value_floor_eth
+    x_label: "Transaction minimum (ETH)"
+    x_values: [0.10, 0.25, 0.50, 0.75]
+    y_target: traffic.value_cap_eth
+    y_label: "Transaction maximum (ETH)"
+    y_values: [1.5, 2.0, 3.0, 4.0]
+  hard_epsilon_x_window:
+    x_target: arm.hard.epsilon
+    x_label: "Hard-window epsilon"
+    x_values: [0.05, 0.10, 0.20, 0.35, 0.50, 0.70]
+    y_target: exp.tdr_window_blocks
+    y_label: "Demand window (blocks)"
+    y_values: [2, 3, 4, 5, 6, 8]
+  proportional_epsilon_x_window:
+    x_target: arm.proportional.epsilon
+    x_label: "Proportional epsilon"
+    x_values: [0.05, 0.10, 0.20, 0.35, 0.50, 0.70]
+    y_target: exp.tdr_window_blocks
+    y_label: "Demand window (blocks)"
+    y_values: [2, 3, 4, 5, 6, 8]
+
+# Optional exhaustive products. They are intentionally not included by `all`;
+# request them explicitly with `--stage cartesian --only <name>`.
+cartesian_sets:
+  ewma_policy:
+    arm.ewma.epsilon: [0.20, 0.35, 0.50, 0.65, 0.80]
+    arm.ewma.half_life: [1, 2, 4, 8, 12]
+    arm.ewma.q_min: [0.20, 0.30, 0.40, 0.60]
+  workload:
+    arm.all.balance_eth: [0.5, 0.75, 1.0, 1.25, 1.5]
+    traffic.value_floor_eth: [0.10, 0.25, 0.50, 0.75]
+    traffic.value_cap_eth: [1.5, 2.0, 3.0, 4.0]
+  comparison_policies:
+    exp.tdr_window_blocks: [2, 3, 4, 5, 6]
+    arm.valve.cap_mult: [1.10, 1.20, 1.30, 1.50]
+    arm.proportional.epsilon: [0.05, 0.10, 0.20, 0.35]
+    arm.hard.epsilon: [0.05, 0.10, 0.20, 0.35]
