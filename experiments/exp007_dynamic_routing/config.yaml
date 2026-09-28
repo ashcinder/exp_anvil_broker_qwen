@@ -1,0 +1,77 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp007 · 动态路由（M3 核心上线）—— 静态指派 vs 实时匹配，同会话对照
+# coordinator 按块释放到达 → 用余额估计表实时挑 broker → 队列投递 →
+# broker 本地账本终审（不够则自走 relay）。兼任 M3 里程碑验收。
+# 判据/设计见本目录 README.md。覆盖：
+#   python run.py --set exp.rates=25 --set exp.ctx_per_broker=4   # 冒烟
+# ══════════════════════════════════════════════════════════════════════════
+label: exp007_dynamic_routing
+
+exp:
+  rates: "25,75,150"           # 动态臂的注入速率档（CTX/逻辑块）
+  static_rates: "75,150"       # 静态对照臂的速率（与动态臂同会话直接比，H-D1）
+  ctx_per_broker: 200          # N = 50 × 200 = 10000 笔（exp006 同规模同构造）
+  pool_scan: 30000             # trace 扫描行数（同 exp006）
+  group_cap_mult: 2.0          # 巨鲸组过滤上限 = 此值 × 组均值（同 exp006）
+  seed: 42                     # 负载构造种子（与 exp006 一致 ⇒ 同一股流可跨实验对照）
+  route_seed: 7                # 匹配层 RNG 种子（独立于装箱；决定"无候选随机指派"的落点）
+  balances_eth: 150            # 每 broker 每分片垫资（与 exp006 同档：dst 会耗尽 → 触发回退）
+  sender_window: 2             # 每个 (sender,src) 同时在途 ≤此值。174 个 sender 键在
+                               # window=1 时是硬并发上限（≈键数/e2e≈87 CTX/s，低于机器）；
+                               # 取 2 解除该结构上限，nonce 缺号只会短暂 stall（队列不丢，终会落）。
+                               # window=1 作 H-D3 探针臂（严格序列化下界）对照。
+  window_probe_rate: 80        # H-D3 敏感性档：该速率额外跑一遍 window=window_probe
+  window_probe: 1              # 探针臂窗口（=严格序列化，展示 window 作为旋钮的下界）
+  loop_sleep_s: 0.005          # 协调器主循环 tick 间隔（块高另有 release_poll_s 节流）
+  lookahead: 400               # 每轮派发最多扫过这么多个已释放未派发的队头（防单 sender 卡全队）
+  max_inflight: 24             # 引擎在途段上限（同 exp006）
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120         # coordinator 代铸段超时
+  engine_timeout_s: 150        # 引擎单段超时
+  release_poll_s: 0.15         # 块高轮询间隔（到达与刷新的时钟源）
+  refresh_every_blocks: 1      # 估计表全量 RPC 刷新的块间隔（200 RPC/次，线程池并行）
+  refresh_workers: 8           # 刷新并行读手线程数（每线程独立 Web3 连接，不共享 session）
+  max_backlog: 6000            # 看门狗：已释放未派发积压上限（M3 验收项：小值验证可中止）
+  t_ready_budget_s: 180        # coordinator + 50 引擎冷启动预算
+  drain_tail_s: 300            # 全部释放后等待落定的墙钟上限
+  rss_cap_mb: 9000
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 4
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false               # 动态路由基准不掺手续费变量（B2E 已在 exp004 立账）
+
+tdr:
+  enabled: false               # 本实验是 TDR 的承载层；策略本体在 M4
+
+output:
+  results_root: results

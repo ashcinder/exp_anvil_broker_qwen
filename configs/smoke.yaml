@@ -1,0 +1,47 @@
+# M1 基座档：2 分片、1 broker、真实 ETH 数据、单进程执行（无 TDR）
+label: smoke
+
+chain:
+  anvil_bin: null            # null → 自动发现 ~/.foundry/bin/anvil 或 PATH
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 2
+  base_port: 8600
+  chain_id_base: 43000       # 每分片独立 chainId（43000+i），防跨片交易重放
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 260   # 派生账户上限；账户余额全部从 0 开始由 setup 显式充值
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 1
+  user_base_index: 200
+  num_users: 50
+
+broker:
+  initial_balance_eth: 100        # 每 broker 每分片子账户初始余额（ETH）—真·流动性
+  relay_mint_budget_eth: 1000     # relay = burn-and-mint 的【铸造预算】，每分片
+                                  # coordinator 账户执行 mint 腿（真实转账，代表分片
+                                  # 委员会按协议铸币）；Σ支出 ≡ ΣBURN 销毁额（demo 校验），
+                                  # 与 broker 流动性不同：可耗尽 = 配置错误，不是协议结果。
+
+traffic:
+  kind: real_csv
+  real_csv_path: null            # null → 默认 <项目根>/trace/ETH_cleaned.csv；
+                                 # 相对路径按项目根解析（可移植，无绝对路径进配置）
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+tdr:
+  enabled: false             # M1 纯 BrokerChain 基座；TDR 在后续里程碑接入
+  trigger_mode: excess_only
+  window_blocks: 10
+  epsilon: 0.10
+  q_min: 0.10
+  chi_blocks: 5
+  timeout_blocks: 5
+
+output:
+  results_root: results

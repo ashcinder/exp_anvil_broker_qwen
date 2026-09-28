@@ -1,0 +1,69 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp005 · broker 执行基底基准 —— 50 broker 的流水线 tick 引擎跑在三种容器上：
+#   serial（单进程轮转 50 引擎）/ threads（50 线程）/ processes（50 子进程）。
+# 三臂共用同一 BrokerEngine（brokerlab/broker_engine.py），只差容器；
+# 回答"每 broker 一进程"这一 M3 锁定决策的成本收益。参数唯一来源=本文件。
+# ══════════════════════════════════════════════════════════════════════════
+label: exp005_broker_substrate_benchmark
+
+exp:
+  modes: "serial,threads,processes"  # 要跑的臂，逗号分隔；dev 冒烟可 --set exp.modes=serial
+  ctx_per_broker: 16                 # K：每 broker 目标笔数；总负载 N = num_brokers × K = 800
+  pool_scan: 3000                    # trace 扫描行数：巨鲸过滤后按组大小升序整组累加，
+                                     # 凑到 ≥N 即截断 ⇒ 入选组小而密、每箱 2+ 组，
+                                     # LPT 才有腾挪空间（重发送者组代表性低——README 声明）
+  group_cap_mult: 2.0                # 巨鲸过滤：组大小 > 此值×组均值 ⇒ 整组弃用。
+                                     # 组是 nonce 原子单位不可拆，巨鲸组会把 LPT 均衡打穿
+                                     #（实测 3000 行里有 34 笔/组的地址 vs 均值 30）
+  seed: 42                           # LPT 装箱的组序 shuffle 种子（划分不变量与种子无关）
+  max_inflight: 16                   # 引擎在途上限（段数）；≥K ⇒ 整箱一次放完（流水线全开）
+  poll_s: 0.05                       # tick 间隔（秒）：无在途进展时的步频，非策略时间（逻辑量仍按块）
+  probe_s: 0.2                       # 单笔每段的回执探针间隔——与 exp001 的 0.2s 轮询同粒度，延迟可比
+  probe_first_s: 0.9                 # 提交后首探针延迟（<1 块=1s）：省掉注定 miss 的 RPC 往返
+  timeout_s: 90                      # 单段"提交→回执"超时（与 wait_receipt 同值），触发即记 fail
+  fund_buffer_eth: 1                 # sender 垫资 = Σ应转 + 此 buffer（exp001 惯例）
+  broker_buffer_eth: 2               # broker 每分片垫资 = dst 需求 + 此 buffer（reserve 门不应触发）
+  serial_speedup_min: 2              # H-B1 门槛：并行臂墙钟至少快于串行臂的倍数
+  t_ready_budget_s: 120              # H-B3 预算：50 进程冷启动（spawn+import web3）总时限
+  rss_cap_mb: 6000                   # 看门狗：全部被监控进程 RSS 之和超此值即中止（exit 2）
+  anchor_dir: "experiments/exp001_relay_vs_broker/out/20260904_024203"
+                                     # 外部锚点：exp001 阻塞式产物目录（相对项目根）。
+                                     # 读其 ctx_rows.csv 画阻塞臂 ECDF、按 summary 算 s/笔，
+                                     # 得 G4 判据"tick 吞吐 ≥ 5× 阻塞口径"
+
+chain:                               # ── Anvil 集群：与 exp001/002 同构（2 分片、1s 块）──
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 2
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450           # 索引到 399（user 段 200+200），加载校验 400 ≤ 450
+  accounts_balance_eth: 0
+
+scale:                               # ── 角色索引段 ──
+  coordinator_index: 1               # 本实验不签 coordinator（无 relay 臂）；仅占位
+  broker_base_index: 100             # broker 0..49 → 索引 100..149
+  num_brokers: 50                    # 50 个并发执行体 = 被测对象本身
+  user_base_index: 200
+  num_users: 200                     # 用户池越大，发送者组越细碎 ⇒ 每箱装得下多组，
+                                     # LPT 腾挪空间大；200 池 × 3000 行 ⇒ 全量组均值 15，
+                                     # 升序累加后入选组均值 ≈ 4–8，50 箱均衡
+
+broker:                              # ── 流动性字段本实验不使用（充值按需求精确计算）──
+  initial_balance_eth: 100
+  relay_mint_budget_eth: 1000
+
+traffic:                             # ── 数据源：真实 ETH trace（规则与 exp001/002 全同）──
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50                    # （不使用；注入量 = exp.num_brokers × ctx_per_broker）
+
+tdr:
+  enabled: false                     # 基底与 TDR 正交；本实验关
+
+output:
+  results_root: results              # （产物写本包 out/<ts>/）

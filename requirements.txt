@@ -1,0 +1,4 @@
+web3==7.16.0
+eth-account==0.13.7
+PyYAML>=6.0
+pytest>=8

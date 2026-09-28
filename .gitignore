@@ -1,0 +1,16 @@
+# 试验数据与运行产物不进 Git
+trace/
+**/out/
+**/results/
+*.csv
+*.db
+*.log
+*.json
+*.pdf
+*.png
+**/TAG
+**/*_DONE
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.venv/

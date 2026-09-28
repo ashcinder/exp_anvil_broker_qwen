@@ -1,0 +1,73 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp006 · 注入速率不变性 + 机器吞吐上限 —— 50 broker × 4 分片 × 上万笔
+# 同一批真实 trace 负载，按【逻辑块释放】注入（到达只被新区块驱动，绝不被墙钟驱动，
+# 这是审计 F1 的结构性防线）。扫多档 ctx_per_block，检验：
+#   H-R1 速率不变性：路由决策序列与逐 broker 终值与注入速率无关；
+#   H-R2 守恒不随负载退化：各速率全局净和 = 0 wei、broker 链上 == 镜像；
+#   H-R3 吞吐上限：找出这台机器墙钟吞吐随速率升到平台的位置（超过即排队不涨吞吐）。
+# 参数唯一来源=本文件；缺键 run.py 即报错。覆盖：
+#   python run.py --set exp.rates=5,20 --set exp.ctx_per_broker=4   # dev 冒烟
+# ══════════════════════════════════════════════════════════════════════════
+label: exp006_rate_invariance
+
+exp:
+  rates: "25,75,150,300"             # 注入速率档 CTX/逻辑块（自变量，对数梯度）。
+                                     # r < 上限：吞吐≈r（释放受限，wall≈N/r）；
+                                     # r > 上限：吞吐≈上限（耗尽受限，积压增长）——
+                                     # 拐点即机器吞吐平台（H-R3）。低档给 H-R1 留干净锚点。
+  ctx_per_broker: 200                # 每 broker 目标笔数；总负载 N = 50 × 200 = 10000 笔（>1 万）
+  pool_scan: 30000                   # trace 扫描行数（巨鲸组过滤后仍要凑得齐 N；跨全部 4 分片）
+  group_cap_mult: 2.0                # 组大小 > 此值×均值 ⇒ 整组弃用（同 exp005：组是 nonce 原子单位）
+  seed: 42                           # LPT 装箱种子；各速率档共用 ⇒ 指派序列逐位一致（H-R1 前提）
+  balances_eth: 150                  # 每 broker 每分片垫资：充足 ⇒ broker 路径占主导，
+                                     # 吞吐上限反映引擎+RPC+anvil，而非被 coordinator 串行化拖住。
+                                     # relay 兜底仍会在个别热分片触发的少数笔上被用到（覆盖两路径）。
+                                     # 注：dev 低垫资实验（bal=1）另测 coordinator 串行上限。
+  max_inflight: 24                   # 引擎在途段上限；越高越能吃满 RPC 并发（上限探测的一部分）
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120               # coordinator 代铸段超时（比 CTX burn 段宽松，防误杀）
+  engine_timeout_s: 150              # 单段 burn 超时
+  release_poll_s: 0.15               # 到达监视器轮询链高的间隔
+  t_ready_budget_s: 180              # 三容器就绪预算（coordinator + 50 引擎 spawn）
+  drain_tail_s: 240                  # 到达释放完后，等待在途落定的墙钟上限
+  rss_cap_mb: 9000                   # 看门狗：anvil×4 + coordinator + 50 引擎 的 RSS 之和上限
+
+chain:                               # ── Anvil 集群：4 分片 ──
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 4
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:                               # ── 角色索引段 ──
+  coordinator_index: 1               # 单一 coordinator 进程：代铸所有 relay 的 mint 段（账户单写者）
+  broker_base_index: 100             # broker 0..49 → 100..149
+  num_brokers: 50
+  user_base_index: 200               # 用户 200..399
+  num_users: 200
+
+broker:
+  initial_balance_eth: 40            # （run.py 用 exp.balances_eth；此字段兼容 demo）
+  relay_mint_budget_eth: 1000        # coordinator 铸造预算基准（脚本按全 relay 最坏情形上浮）
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:                                 # 本实验不测手续费；关闭，机制层走无费用路径
+  enabled: false
+
+tdr:
+  enabled: false
+
+output:
+  results_root: results

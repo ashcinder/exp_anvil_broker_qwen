@@ -1,0 +1,71 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp002 · broker 资金耗尽基线（无 TDR，复现手稿 Experiment A）—— 实验配置
+# 参数唯一来源=本文件；缺键 run.py 即报错。临时覆盖：
+#   python run.py --set exp.count=200 --set exp.balances=100,300
+# ══════════════════════════════════════════════════════════════════════════
+label: exp002_broker_drain_no_tdr   # 实验标识：进参数快照与产物元数据
+
+exp:                                # ── 实验专属参数（run.py 消费）──
+  count: 150                        # 定向流 CTX 数（每个余额条件跑同样的 150 笔、同序）。
+                                    # 与流合计联动：sum(amount) 必须 > 最大余额档，否则不耗尽
+                                    # （run.py 会打印警告，不静默出假阴性结论）
+  balances: "100,300"               # broker 每分片初始余额档位（ETH，逗号分隔）。
+                                    # 两档 = C4 判据设计：只考察"充值加倍是否只推迟耗尽"；
+                                    # 各档独立起一条全新链（同 trace 流、同随机布局）
+  pool_scan: 2000                   # 从 trace 流式扫描的行数（过金额/跨片/账户非碰撞过滤后），
+                                    # 从中按实测【多数方向】取前 count 笔——方向性是数据里
+                                    # 筛出来的（实测 52%:48%），不是合成假设
+  match_ctrl_bytes: 100             # 跨片通信账的 broker 侧唯一模型常数（与 exp001 同口径，
+                                    # 保证两实验字节可比；relay 侧为 Θ1 RLP+回执实测）
+  seed: 42                          # static_broker 匹配种子（brokerlab/matching.py）：
+                                    # eligible=目的余额≥v 者均匀随机选，无 eligible⇒relay。
+                                    # 两条件（100/300）共用同一 seed ⇒ 选择序列跨条件可比，
+                                    # C4"只推迟"判读不被随机差异污染。num_brokers=1 时退化
+                                    # 为恒选 0 号，与单 broker 旧版逐位一致
+
+chain:                              # ── Anvil 链集群（与 exp001 同构，逐条注释见彼处）──
+  anvil_bin: null                   # null → 自动发现 ~/.foundry/bin/anvil → PATH
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+                                    # 标准测试助记词（无真实资产）；全分片共享 →
+                                    # broker 同一地址在各分片各有独立余额/nonce = 子账户模型
+  num_shards: 2                     # 分片数（2 分片下"定向流"= 多数方向一侧）
+  base_port: 8600                   # 首分片 RPC 端口，分片 i = base+i；端口探测防 TIME_WAIT
+                                    # 误报、只收自家 PID（与 exp001 连跑互不杀伤）
+  chain_id_base: 43000              # 分片独立 chainId（base+i）：签名交易防跨片重放
+  block_time_s: 1                   # 出块间隔（秒）。全部判据按块索引/执行序计，块时长
+                                    # 只影响墙钟；论文引用块号类指标需报档位（见 README）
+  gas_limit: 30000000               # 块 gas 上限；本实验每块 ≤ 数笔 21000-gas 交易，不饱和
+  num_funded_accounts: 260          # 预派生账户数（须覆盖最大索引 249，加载时校验）
+  accounts_balance_eth: 0           # 全账户白手起家，setup 显式充值 → 守恒基线干净
+
+scale:                              # ── 角色索引段（互斥性由配置加载校验）──
+  coordinator_index: 1              # relay 签发账户（burn-and-mint 的 mint 腿执行者）
+  broker_base_index: 100            # broker b 索引 = base+b（本实验单 broker=0 号，索引 100）
+  num_brokers: 1                    # 每分片资金池 = num_brokers × exp.balances 档位。
+                                    # 1 号即可展示空间失衡；>1 时 static_broker 随机分流生效
+                                    # （exp002 当前验证状态为 1 号配置）
+  user_base_index: 200              # 用户账户索引起点（真实地址→int(addr,16)%num_users+base，
+                                    # 与旧三代映射一致）
+  num_users: 50                     # 用户池
+
+broker:                             # ── 流动性与预算 ──
+  initial_balance_eth: 100          # 默认垫背值；本实验的实际余额档由 exp.balances 逐条件
+                                    # 覆盖（100/300 两档各自起链时显式 setBalance）
+  relay_mint_budget_eth: 1000       # coordinator 铸造预算/分片（非流动性）：run.py 按
+                                    # "全部回退"最坏情形自动上浮，Σ支出≡Σ销毁由对账核验
+
+traffic:                            # ── 数据源 ──
+  kind: real_csv                    # ETH 主网真实交易流
+  real_csv_path: null               # null → <项目根>/trace/ETH_cleaned.csv（项目搬家零改动）
+  value_floor_eth: 0.01             # 滤 dust：0 值/微值转账会稀释耗尽动态
+  value_cap_eth: 10.0               # 滤清算巨鲸：一笔 >10 ETH 会单笔抽干 broker，
+                                    # 把"渐变失衡"研究场景变成"闪崩"，与手稿 fig1 不符
+  max_extract: 50                   # （本实验不使用；加载量由 exp.pool_scan/exp.count
+                                    # 控制。字段保留兼容 demo 配置结构）
+
+tdr:                                # ── TDR：本实验存在的意义就是展示"没有它会怎样" ──
+  enabled: false                    # 硬编码关。exp002 = exp003（TDR on/off 对照）的
+                                    # off 臂；两臂共用同一负载构造代码路径
+
+output:
+  results_root: results             # （实验产物写在本包 out/<ts>/ 下，此字段仅供 demo）
