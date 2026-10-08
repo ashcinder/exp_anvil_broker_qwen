@@ -117,6 +117,17 @@ def natural_windows(pool, cfg, count):
     Candidate catalog and selection bias are exposed, no claim of holdout.
     """
     cross = cross_only(mapped(pool))
+    if cfg.exp.get("ordinary_only", False):
+        if len(cross) < count:
+            raise ValueError("Insufficient natural cross-shard rows; increase candidate_count")
+        rows = cross[:count]
+        return [("ordinary", rows, {}, dict(window_index=0,
+                    selection="first chronological prefix after declared raw filters; no window ranking",
+                    destination_shard_filter=cfg.exp.get("destination_shard_filter")))], {
+                    "ordinary_only": True, "eligible_cross_shard_rows": len(cross),
+                    "destination_shard_filter": cfg.exp.get("destination_shard_filter"),
+                    "selected_first_line": rows[0]["source_line"],
+                    "selected_last_line": rows[-1]["source_line"]}
     chunks = [cross[i:i+count] for i in range(0, len(cross)-count+1, count)]
     if len(chunks) < 3:
         raise ValueError("exp14 needs >=3 full natural CTX windows; increase candidate_count")

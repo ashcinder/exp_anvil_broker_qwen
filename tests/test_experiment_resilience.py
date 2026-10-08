@@ -19,6 +19,55 @@ def _load(name, relative):
     return module
 
 
+def test_exp003_budget_allows_last_partial_release_block():
+    module = _load("exp003_release_budget_test", "experiments/exp003_tdr_on_off/run.py")
+    # 80000 CTX require 667 blocks, not 666.67 seconds, at 120 CTX/block.
+    assert module._execution_budget_s(80000, 120, 5, 1800) == 5135
+    assert module._execution_budget_s(80000, 120, 1, 1800) == 2467
+    assert module._execution_budget_s(240, 120, 5, 0) == 10
+
+
+def test_exp003_coordinator_survives_old_one_second_block_deadline(monkeypatch):
+    import queue
+
+    module = _load("exp003_coordinator_budget_test", "experiments/exp003_tdr_on_off/run.py")
+    clock = SimpleNamespace(now=0.0)
+    sleeps = []
+    reads = 0
+
+    def now():
+        nonlocal reads
+        reads += 1
+        if reads > 2 and clock.now == 0:
+            clock.now = 2468.0  # Old deadline would abort before full release.
+        return clock.now
+
+    def sleep(seconds):
+        sleeps.append(seconds)
+        clock.now = 5136.0  # End on the corrected deadline on the next iteration.
+
+    monkeypatch.setattr(module.time, "monotonic", now)
+    monkeypatch.setattr(module.time, "sleep", sleep)
+    monkeypatch.setattr(module, "build_services", lambda _: (
+        SimpleNamespace(block_number=lambda _: 0), SimpleNamespace(),
+        SimpleNamespace(num_brokers=1)))
+    params = dict(num_shards=1, num_brokers=1, balances_eth=45, route_seed=7,
+                  release_poll_s=.15, max_backlog=80000, dispatch_per_tick=200,
+                  loop_sleep_s=.005,
+                  execution_budget_s=module._execution_budget_s(80000, 120, 5, 1800))
+    ctx_queue, close_queue, done_queue = queue.Queue(), queue.Queue(), queue.Queue()
+    close_queue.put(0)  # No in-flight engine work in this timeout-only fixture.
+    module._routing_coordinator_worker(
+        {}, params, 120, 2, [{}] * 80000, [ctx_queue], queue.Queue(),
+        queue.Queue(), [queue.Queue()], close_queue, queue.Queue(), done_queue,
+        SimpleNamespace(wait=lambda: None))
+    result = done_queue.get_nowait()
+    assert result["error"] is None
+    assert result["aborted"].startswith("deadline")
+    assert sleeps == [.005]  # The coordinator continued past 2468s.
+    assert ctx_queue.get_nowait() == module.END
+
+
 @pytest.fixture(params=[
     ("exp007_run_test", "experiments/exp007_dynamic_routing/run.py"),
     ("exp003_run_test", "experiments/exp003_tdr_on_off/run.py"),

@@ -30,6 +30,7 @@ exp:
   tdr_base_floor_frac: 0.05
   tdr_ewma_half_life: 0.0
   tdr_ewma_min_blocks: 5
+  tdr_ewma_window_blocks: 20       # 仅 EWMA：最近 W 块内的指数加权需求
   tdr_target_cap: 0.0
   tdr_min_reserve_eth: 0.0
   tdr_surplus_epsilon: 0.10
@@ -48,7 +49,7 @@ exp:
   rss_cap_mb: 9000
 
   exp010_profile: search
-  exp010_replicates: 1
+  exp010_replicates: 10
   exp010_proportional_epsilon: 0.10
   exp010_hard_epsilon: 0.10
   exp010_hard_chi_blocks: 10

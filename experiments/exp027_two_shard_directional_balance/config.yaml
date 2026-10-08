@@ -1,0 +1,92 @@
+label: exp027_two_shard_directional_balance
+exp:
+  rate: 120
+  ctx_per_broker: 1000
+  pool_scan: 200000
+  pool_scan_max: 1600000
+  source_shard: 0
+  destination_shard: 1
+  seed: 42
+  route_seed: 7
+  repetitions: 1
+  balances_eth: 45
+  arms: plain@45,topup@45@@0.95@@20@0.3
+  sender_window: 2
+  max_backlog: 1000
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  # Small mechanism demonstration; allow time for confirmations and TDR draining.
+  # Total arm deadline = CTX / offered rate + this drain allowance (seconds).
+  drain_tail_s: 1200
+  refresh_every_blocks: 1
+  refresh_workers: 2
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  rss_cap_mb: 9000
+  coord_budget_mult: 6.0
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.95
+  tdr_q_min: 0.3
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 20
+  tdr_ewma_min_blocks: 5
+  tdr_ewma_window_blocks: 0
+  tdr_ewma_two_sided: false
+  match_ctrl_bytes: 100
+chain:
+  anvil_bin: null
+  mnemonic: myth like bonus scare over problem client lizard pioneer submit female collect
+  num_shards: 2
+  base_port: 8800
+  chain_id_base: 45000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 1
+  user_base_index: 200
+  num_users: 200
+broker:
+  initial_balance_eth: 45
+  relay_mint_budget_eth: 1000
+traffic:
+  kind: real_csv
+  real_csv_path: trace/ETH_cleaned.csv
+  allow_contract_endpoints: false
+  value_floor_eth: 0.01
+  # Small real transfers avoid draining a 45 ETH destination in the first block.
+  value_cap_eth: 0.2
+  max_extract: 50
+tdr:
+  enabled: true
+  trigger_mode: excess_only
+  window_blocks: 20
+  epsilon: 0.95
+  q_min: 0.3
+  chi_blocks: 10
+  timeout_blocks: 20
+b2e:
+  enabled: true
+  fee_share: 0.1
+  gas_units_per_ctx: 21000
+  ref_gas_price_wei: 1000
+  charges_rebalancing: false
+output:
+  results_root: results

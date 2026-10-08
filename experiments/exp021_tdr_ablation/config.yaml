@@ -1,0 +1,84 @@
+# exp021: exp008 workload/chain settings, with a genuine 2x2 TDR ablation.
+# Each arm receives the same 80,000 ordered clean-trace CTXs and route seed.
+label: exp021_tdr_ablation
+
+exp:
+  exp021_ctx_total: 80000
+  rate: 120
+  ctx_per_broker: 1600
+  pool_scan: 250000
+  group_cap_mult: 2.0
+  seed: 42
+  route_seed: 7
+  balances_eth: 150
+  match_ctrl_bytes: 100
+  sender_window: 2
+  max_backlog: 20000
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.95
+  tdr_q_min: 0.10
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0
+  # plain; proportional+hard; proportional+EWMA; top-up+hard; top-up+EWMA.
+  # Token fields: name@fund@cap@epsilon@chi@EWMA-half-life.
+  arms: "plain@150,tdr@150@@0.95,tdr@150@@0.95@@20,topup@150@@0.95,topup@150@@0.95@@20"
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  drain_tail_s: 1800
+  coordinator_mint_budget_eth_per_shard: 2000000
+  rss_cap_mb: 9000
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: trace/ETH_cleaned.csv
+  allow_contract_endpoints: false
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false
+
+tdr:
+  enabled: true
+
+output:
+  results_root: results

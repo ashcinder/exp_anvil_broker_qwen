@@ -151,10 +151,11 @@ class TdrDynamicEngine(DynamicBrokerEngine):
         for i, tr in enumerate(self._tdr_items):
             if tr["stage"] == "first_submitted":
                 r = tr.pop("__late", None)
-                if r is None:
-                    r = self._tx.probe_receipt(tr["h1"], tr["src"]) if now >= (
-                        tr.get("next_probe", 0.0)) else None
-                tr["next_probe"] = now + self._probe_s
+                if r is None and now >= tr.get("next_probe", 0.0):
+                    r = self._tx.probe_receipt(tr["h1"], tr["src"])
+                    # Advance the deadline only after a real probe. Updating it
+                    # on every fast tick would indefinitely postpone polling.
+                    tr["next_probe"] = now + self._probe_s
                 if r is not None:
                     if r["status"] != 1:
                         self._ledger.release(tr["src"], tr["amount"])
@@ -271,10 +272,13 @@ def tdr_engine_from_payload(payload: t.Mapping[str, t.Any],
                          tp.get("demand_ewma_half_life", 0.0)),
                      demand_ewma_min_blocks=int(
                          tp.get("demand_ewma_min_blocks", 5)),
+                     demand_ewma_window_blocks=int(
+                         tp.get("demand_ewma_window_blocks", 0)),
                      target_cap=float(tp.get("target_cap", 0.0)),
-                      min_reserve_wei=int(tp.get("min_reserve_wei", 0)),
-                      surplus_epsilon=float(tp.get("surplus_epsilon",
-                                                   tp["epsilon"])))
+                     min_reserve_wei=int(tp.get("min_reserve_wei", 0)),
+                     surplus_epsilon=float(tp.get("surplus_epsilon",
+                                                   tp["epsilon"])),
+                     topup_two_sided=bool(tp.get("topup_two_sided", False)))
     return TdrDynamicEngine(
         tx, users,
         broker_idx=int(payload["broker_idx"]),

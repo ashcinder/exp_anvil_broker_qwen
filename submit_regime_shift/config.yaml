@@ -1,0 +1,121 @@
+# 突变实验单次运行配置：16 分片 × 50 broker × 800 CTX = 40000 CTX。
+# 来源：data/summaries/arm_Y_hl20_r1.json 的 params 快照。
+# 已移除历史批次网格和运行后统计，将 trace 路径改为仓库相对路径。
+# 当前提交脚本必须设置 shift_to_shard >= 0 才能开启 shift_cycle。
+# 本配置恢复报告中的实验设计；当前依赖代码与历史版本不同，结果可能变化。
+# 在仓库根目录运行：
+# python submit_regime_shift/scripts/run.py --config submit_regime_shift/config.yaml
+
+label: exp011_param_sensitivity
+
+exp:
+  # 负载构造与随机种子
+  rate: 120
+  ctx_per_broker: 800
+  pool_scan: 200000
+  group_cap_mult: 2.0
+  seed: 42
+  route_seed: 7
+  balances_eth: 45
+  sender_window: 2
+
+  # 注入顺序的前 30% 不变，后 70% 每 1600 笔在分片 11、3 间轮换。
+  # shift_to_shard 是当前脚本的总开关；非空 shift_cycle 决定实际目标。
+  shift_to_shard: 11
+  shift_start_frac: 0.3
+  shift_span_frac: 1.0
+  shift_period_frac: 0.04
+  shift_cycle: "11,3"
+  shift_intensity: 1.0
+
+  # 提交、余额刷新、尾部排空与进程限制
+  max_backlog: 40000
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  drain_tail_s: 1800
+  refresh_every_blocks: 10
+  refresh_workers: 16
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  rss_cap_mb: 9000
+  # 此提交脚本使用的协调器铸造预算倍率，不是 broker 垫资。
+  coord_budget_mult: 6.0
+
+  # 历史快照的 TDR 后备值；arms 中的非空字段会覆盖相应值。
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.1
+  tdr_q_min: 0.1
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0
+
+  # 格式：name@fund@cap@epsilon@chi@half_life@q_min
+  # 有效设置：topup，垫资 45，epsilon=0.95，chi=10，hl=20，q_min=0.3。
+  # hl 扫描：2,4,10,20,50,150,400；固定 q_min=0.3。
+  # q_min 扫描：0,0.1,0.3,0.5,0.7,0.9；固定 hl=10。
+  # 每点需串行运行三次；run.py 不自动循环扫描或重复。
+  arms: "topup@45@@0.95@@20@0.3"
+
+chain:
+  anvil_bin: null  # 使用 PATH 中的 anvil；也可填 anvil.exe 的绝对路径。
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  # 保留历史公共配置；本 runner 的实际垫资取 exp.balances_eth / arms。
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: trace/ETH_cleaned.csv  # 按仓库根目录解析。
+  allow_contract_endpoints: false
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50  # 本 runner 的扫描量由 exp.pool_scan 指定。
+
+tdr:
+  # 公共配置保留快照值；本 runner 的引擎参数由 exp / arms 构造。
+  enabled: true
+  trigger_mode: excess_only
+  window_blocks: 10
+  epsilon: 0.1
+  q_min: 0.1
+  chi_blocks: 5
+  timeout_blocks: 5
+
+b2e:
+  enabled: false
+  fee_share: 0.1
+  gas_units_per_ctx: 21000
+  ref_gas_price_wei: 1000000000
+  charges_rebalancing: false
+
+output:
+  results_root: results  # 本 runner 的实际输出目录由 --out-root 指定。

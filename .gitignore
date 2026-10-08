@@ -23,3 +23,13 @@ __pycache__/
 
 # 本地日志
 *.log
+
+# Local experiment datasets, audits, and packaged results
+submit_regime_shift/data/
+submit_regime_shift/reports/EXPERIMENT_REPORT_CN.md
+submit_regime_shift/reports/EXPLORATION_log_CN.md
+submit_regime_shift/reports/REGIME_SHIFT_CN.md
+experiments/exp014_natural_direction/amount_pressure_audit.json
+experiments/exp014_natural_direction/amount_pressure_selected_audit.json
+experiments/exp014_natural_direction/pressure_preview.json
+.DS_Store

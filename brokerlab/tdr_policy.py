@@ -85,9 +85,10 @@ class DemandWindow:
 class EwmaDemand:
     """按块指数衰减的需求速率估计（τ 稳定性实验用）。
 
-    与 DemandWindow 的差别：硬窗口一笔大额滑出就骤降（τ 突变→追涨杀跌）。
-    本估计器无"掉出突变"：每次 observe 把旧累计量按块差指数衰减，
-    再叠加新值。衰减因子 d(Δ)=2^(-Δ/half_life)。
+    默认无限历史 EWMA 没有硬窗口的掉出突变：每次 observe 把旧累计量
+    按块差指数衰减，再叠加新值。衰减因子 d(Δ)=2^(-Δ/half_life)。
+    可选 window_blocks>0 时只统计最近 W 块内的需求，窗口外贡献精确为 0；
+    这会重新引入窗口边界的截断，但边界贡献已按半衰期衰减。默认 0 保持原语义。
 
     observe 必须允许完成回报乱序：状态始终锚定在见过的最大块高；迟到事件
     先衰减到该锚点再加入，绝不把时间锚倒拨。
@@ -96,13 +97,17 @@ class EwmaDemand:
     demand(block,shard_count)→(λ, 总量)。纯逻辑，无 I/O。"""
 
     def __init__(self, half_life_blocks: float = 20.0,
-                 min_blocks: int = 5) -> None:
+                 min_blocks: int = 5, window_blocks: int = 0) -> None:
         if half_life_blocks <= 0:
             raise ValueError("half_life_blocks must be > 0")
         if min_blocks <= 0:
             raise ValueError("min_blocks must be > 0")
+        if window_blocks < 0:
+            raise ValueError("window_blocks must be >= 0 (0 means unbounded)")
         self.half_life = float(half_life_blocks)
         self.min_blocks = int(min_blocks)      # 冷启动：至少见过几块才 ready
+        self.window_blocks = int(window_blocks)  # 0 保留原来的无限历史 EWMA
+        self._items: t.List[t.Tuple[int, int, int]] = []
         self._rate: t.Dict[int, float] = {}    # shard → 指数衰减需求累计量
         self._last_block: t.Optional[int] = None
         self._first_block: t.Optional[int] = None
@@ -113,6 +118,8 @@ class EwmaDemand:
     def effective_window_blocks(self) -> float:
         """指数核的等效窗口长度：sum(k>=0, 2^(-k/hl))。"""
         per_block_decay = 0.5 ** (1.0 / self.half_life)
+        if self.window_blocks:
+            return (1.0 - per_block_decay ** self.window_blocks) / (1.0 - per_block_decay)
         return 1.0 / (1.0 - per_block_decay)
 
     def observe(self, block: int, dst_shard: int, value: int) -> None:
@@ -123,6 +130,10 @@ class EwmaDemand:
         self._n_blocks = len(self._seen_blocks)
         if self._first_block is None or block < self._first_block:
             self._first_block = block
+        if self.window_blocks:
+            # 有限滑窗必须保存逐笔块高，才能精确剔除过期需求；允许乱序回补。
+            self._items.append((block, int(dst_shard), int(value)))
+            return
 
         late_decay = 1.0
         if self._last_block is not None and block > self._last_block:
@@ -149,6 +160,15 @@ class EwmaDemand:
     def demand(self, block: int, shard_count: int) -> t.Tuple[t.List[int], int]:
         # 对每个分片做一次块衰减。_rate 本身就是指数窗口内的累计需求，
         # 不再额外乘 half_life；额外相乘会让 base-stock 的量纲多出一维。
+        if self.window_blocks:
+            oldest = int(block) - self.window_blocks + 1
+            self._items = [item for item in self._items if item[0] >= oldest]
+            weighted = [0.0] * shard_count
+            for seen_block, shard, value in self._items:
+                if seen_block <= block and 0 <= shard < shard_count:
+                    weighted[shard] += value * 0.5 ** ((block - seen_block) / self.half_life)
+            lam = [int(value) for value in weighted]
+            return lam, sum(lam)
         decay = 1.0
         if self._last_block is not None and block > self._last_block:
             gap = block - self._last_block
@@ -163,6 +183,9 @@ class EwmaDemand:
         return lam, total
 
     def count(self, block: int) -> int:
+        if self.window_blocks:
+            oldest = int(block) - self.window_blocks + 1
+            return len({b for b, _, _ in self._items if oldest <= b <= block})
         return self._n_blocks
 
 
@@ -395,24 +418,43 @@ def base_target(actual: t.Sequence[int], demand: t.Sequence[int],
 
 def topup_plans(actual: t.Sequence[int], target: t.Sequence[int],
                 epsilon: float,
-                surplus_epsilon: t.Optional[float] = None) -> t.List[Transfer]:
+                surplus_epsilon: t.Optional[float] = None,
+                two_sided: bool = False) -> t.List[Transfer]:
     """只补缺口、绝不下抽的再平衡（valve 纪律 × 需求份额目标）。
 
     与 compute_transfers 的全部差别：compute_transfers 触发后把【所有】盈余
     抽到恰为 τ（全量重排，proportional 因此每次事件搬一大坨）。本函数只
     把低于 τ 的分片补到 τ，抽取方只出"高于自己 τ 的那部分"，补完即停——
-    高于 τ 的闲置资金不被动。缺货侧触发（某分片 < τ−ετ 才动）。
+    高于 τ 的闲置资金不被动。默认缺货侧触发（某分片 < τ−ετ 才动）。
+
+    two_sided=True 时，同一 ε 定义两侧死区：任一账户低于 (1−ε)τ 或
+    高于 (1+ε)τ 都能触发。若只有一侧越界，另一侧可从所有实际缺口/盈余
+    账户中配对；仍只搬运匹配账户之间所需的缺口金额。
 
     返回 [] = 无缺口/无盈余可补。仅填缺口、可部分填（盈余不够就欠着）。"""
-    source_eps = epsilon if surplus_epsilon is None else float(surplus_epsilon)
-    deficit = [[i, target[i] - actual[i]]
+    if two_sided:
+        low = [[i, target[i] - actual[i]]
                for i in range(len(actual))
-               if target[i] - actual[i] > 0
-               and actual[i] < target[i] - percent_of(target[i], epsilon)]
-    surplus = [[i, actual[i] - target[i]]
-               for i in range(len(actual))
-               if actual[i] - target[i] > 0
-               and actual[i] > target[i] + percent_of(target[i], source_eps)]
+               if actual[i] < target[i] - percent_of(target[i], epsilon)]
+        high = [[i, actual[i] - target[i]]
+                for i in range(len(actual))
+                if actual[i] > target[i] + percent_of(target[i], epsilon)]
+        if not low and not high:
+            return []
+        deficit = low or [[i, target[i] - actual[i]]
+                          for i in range(len(actual)) if actual[i] < target[i]]
+        surplus = high or [[i, actual[i] - target[i]]
+                           for i in range(len(actual)) if actual[i] > target[i]]
+    else:
+        source_eps = epsilon if surplus_epsilon is None else float(surplus_epsilon)
+        deficit = [[i, target[i] - actual[i]]
+                   for i in range(len(actual))
+                   if target[i] - actual[i] > 0
+                   and actual[i] < target[i] - percent_of(target[i], epsilon)]
+        surplus = [[i, actual[i] - target[i]]
+                   for i in range(len(actual))
+                   if actual[i] - target[i] > 0
+                   and actual[i] > target[i] + percent_of(target[i], source_eps)]
     if not deficit or not surplus:
         return []
     deficit.sort(key=lambda x: -x[1])          # 缺口最大先补

@@ -53,6 +53,12 @@ def exp_param(cfg, key, kind=int):
     return kind(cfg.exp[key])
 
 
+def _execution_budget_s(total_ctx, rate_per_block, block_time_s, drain_tail_s):
+    """Convert the block-based release schedule into a wall-clock budget."""
+    release_blocks = (total_ctx + rate_per_block - 1) // rate_per_block
+    return release_blocks * block_time_s + drain_tail_s
+
+
 def dist(vals):
     """分布摘要：None 先剔除。"""
     vals = [v for v in vals if v is not None]
@@ -354,7 +360,7 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
                 for q in ctx_qs:
                     q.put_nowait(END)        # 引擎停止开新事件；coordinator 继续服务在途
                 end_sent = True
-            if now() - t0 > N / max(rate, 1) + params["drain_tail_s"]:
+            if now() - t0 > params["execution_budget_s"]:
                 aborted = f"deadline（派发 {disp}/{N}，落定 {done}/{N}，收口 {len(closes)}）"
                 if not end_sent:
                     for q in ctx_qs:
@@ -496,6 +502,8 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                        "loop_sleep_s": exp_param(cfg, "loop_sleep_s", float),
                        "release_poll_s": exp_param(cfg, "release_poll_s", float),
                        "drain_tail_s": exp_param(cfg, "drain_tail_s", float)})
+        params["execution_budget_s"] = _execution_budget_s(
+            N, rate, cfg.chain.block_time_s, params["drain_tail_s"])
         tdr_params = None
         if engine != "plain":
             pol = {"proportional": "proportional", "valve": "valve",
@@ -524,12 +532,18 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                                           if hl is None else hl),
                 "demand_ewma_min_blocks": int(cfg.exp.get(
                     "tdr_ewma_min_blocks", 5)),
+                "demand_ewma_window_blocks": int(cfg.exp.get(
+                    "tdr_ewma_window_blocks", 0)),
                 "target_cap": float(cfg.exp.get("tdr_target_cap", 0.0)),
                 "min_reserve_wei": int(float(
                     cfg.exp.get("tdr_min_reserve_eth", 0.0)) * ETH),
                 "surplus_epsilon": float(cfg.exp.get(
                     "tdr_surplus_epsilon",
                     exp_param(cfg, "tdr_epsilon", float) if eps is None else eps)),
+                # exp024 opts in only for the EWMA Top-up target arm.
+                # The hard-window Top-up comparator retains its old policy.
+                "topup_two_sided": (bool(cfg.exp.get("tdr_ewma_two_sided", False))
+                                    and engine == "topup" and hl is not None),
             }
         cfg_plain = {"chain": asdict(cfg.chain), "scale": asdict(cfg.scale)}
         init_wei = int(fund_eth * ETH)
@@ -585,7 +599,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
         gate.set()
         t0 = time.monotonic()
         envs = {}
-        deadline = t0 + N / rate + params["drain_tail_s"] + 120
+        deadline = t0 + params["execution_budget_s"] + 120
         while len(envs) < nb:
             if watchdog.tripped:
                 raise RuntimeError("RSS watchdog tripped")

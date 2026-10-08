@@ -55,7 +55,7 @@ def _tag(token: str) -> str:
 
 def base_state(cfg) -> dict[str, Any]:
     e = cfg.exp
-    return {
+    state = {
         "balance_eth": float(e["balances_eth"]),
         "valve_cap_mult": float(e["tdr_cap_mult"]),
         "proportional_epsilon": float(e["exp010_proportional_epsilon"]),
@@ -67,6 +67,9 @@ def base_state(cfg) -> dict[str, Any]:
         "ewma_min_blocks": int(e.get("exp010_ewma_min_blocks", 5)),
         "ewma_q_min": float(e["exp010_ewma_q_min"]),
     }
+    if "tdr_ewma_window_blocks" in e:
+        state["ewma_window_blocks"] = int(e["tdr_ewma_window_blocks"])
+    return state
 
 
 def apply_target(state: dict[str, Any], overrides: dict[str, Any],
@@ -79,6 +82,7 @@ def apply_target(state: dict[str, Any], overrides: dict[str, Any],
         "arm.ewma.chi_blocks": "ewma_chi_blocks",
         "arm.ewma.half_life": "ewma_half_life",
         "arm.ewma.min_blocks": "ewma_min_blocks",
+        "arm.ewma.window_blocks": "ewma_window_blocks",
         "arm.ewma.q_min": "ewma_q_min",
         "arm.hard.epsilon": "hard_epsilon",
         "arm.hard.chi_blocks": "hard_chi_blocks",
@@ -247,6 +251,8 @@ def common_overrides(trial: Trial, profile: dict[str, Any], route_seed: int,
         "exp.balances_eth": trial.state["balance_eth"],
         "broker.initial_balance_eth": trial.state["balance_eth"],
     })
+    if "ewma_window_blocks" in trial.state:
+        overrides["exp.tdr_ewma_window_blocks"] = int(trial.state["ewma_window_blocks"])
     return overrides
 
 
@@ -261,6 +267,7 @@ def overrides_for_role(overrides: dict[str, Any], role: str) -> dict[str, Any]:
     result = dict(overrides)
     if role != "ewma_topup":
         result.pop("exp.tdr_ewma_min_blocks", None)
+        result.pop("exp.tdr_ewma_window_blocks", None)
     return result
 
 
@@ -606,6 +613,7 @@ PARAMETER_ROLE = {
     "epsilon": "ewma_topup",
     "ewma_half_life": "ewma_topup",
     "ewma_min_blocks": "ewma_topup",
+    "ewma_window_blocks": "ewma_topup",
     "ewma_q_min": "ewma_topup",
     "broker_balance_eth": "ewma_topup",
     "window_blocks": "hard_topup",

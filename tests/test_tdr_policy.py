@@ -317,6 +317,31 @@ def test_ewma_accumulates_and_decays():
     assert 0.4 < lam2[0] / max(lam[0], 1) < 0.7
 
 
+def test_ewma_finite_window_expires_old_events():
+    short = EwmaDemand(half_life_blocks=10, min_blocks=1, window_blocks=5)
+    long = EwmaDemand(half_life_blocks=10, min_blocks=1, window_blocks=10)
+    for estimator in (short, long):
+        estimator.observe(1, 0, 100)
+        estimator.observe(6, 1, 100)
+    short_demand, _ = short.demand(6, 2)
+    long_demand, _ = long.demand(6, 2)
+    assert short_demand == [0, 100]
+    assert long_demand[0] > 0 and long_demand[1] == 100
+    assert short.effective_window_blocks < long.effective_window_blocks
+
+
+def test_ewma_finite_window_late_observation_is_order_independent():
+    ordered = EwmaDemand(half_life_blocks=4, min_blocks=1, window_blocks=5)
+    late = EwmaDemand(half_life_blocks=4, min_blocks=1, window_blocks=5)
+    events = [(8, 0, 100), (10, 1, 80), (11, 0, 60)]
+    for event in events:
+        ordered.observe(*event)
+    for event in (events[1], events[0], events[2]):
+        late.observe(*event)
+    assert late.demand(12, 2) == ordered.demand(12, 2)
+    assert late.count(12) == 3
+
+
 def test_ewma_ready_requires_min_blocks():
     e = EwmaDemand(half_life_blocks=10.0, min_blocks=3)
     assert not e.ready(0)

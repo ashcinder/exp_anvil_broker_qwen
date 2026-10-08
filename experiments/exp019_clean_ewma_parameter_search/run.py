@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the three 10k-CTX clean-data EWMA OAT searches via exp010's executor."""
+"""Run 10-replicate clean-data finite-window EWMA OAT searches via exp010."""
 import subprocess
 import sys
 from pathlib import Path
@@ -16,7 +16,7 @@ def main():
         "--space", str(HERE / "search_space.yaml"),
         "--profile", "search",
         "--stage", "oat",
-        "--only", "ewma_min_blocks,epsilon,ewma_half_life",
+        "--only", "ewma_window_blocks,epsilon,ewma_half_life",
         "--output-root", str(HERE / "out"),
         *sys.argv[1:],
     ]

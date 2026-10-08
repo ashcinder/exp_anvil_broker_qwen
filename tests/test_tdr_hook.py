@@ -1,5 +1,6 @@
 """TdrDynamicEngine 闭环单测（FakeTx）：需求观察→触发→burn→代铸→dst 补液。"""
 from collections import deque
+import pytest
 
 from brokerlab.broker_engine import END
 from brokerlab.brokerchain import BURN_ADDRESS
@@ -67,6 +68,77 @@ def _ctx(i, sender, src, dst, receiver, amt):
     return {"ctx_id": f"c{i:04d}", "sender_idx": sender, "receiver_idx": receiver,
             "src_shard": src, "dst_shard": dst, "amount_wei": amt,
             "arrival_pos": i, "orig_from": "", "orig_to": ""}
+
+
+class TimedReceiptTx(FakeTx):
+    """A receipt becomes visible after one second, independently of poll count."""
+    def __init__(self, status=1):
+        super().__init__()
+        self.status = status
+        self.probe_times = []
+
+    def probe_receipt(self, h, shard):
+        self.probe_times.append(self.now)
+        if self.now < 1.0:
+            return None
+        return {"status": self.status, "block": self._meta[h]["block"],
+                "receipt_bytes": 800}
+
+
+def pending_tdr(status=1):
+    tx = TimedReceiptTx(status)
+    req_q, ack_q = FakeQ(), FakeQ()
+    agent = TdrAgent(2, window_blocks=1, epsilon=.1, q_min=0,
+                     chi_blocks=1, timeout_blocks=20)
+    e = TdrDynamicEngine(tx, FakeUsers(), broker_idx=0, broker_base_index=100,
+                         ctx_q=FakeQ(), rep_q=FakeQ(),
+                         init_wei_by_shard={0: 0, 1: 200 * GWEI},
+                         credit_sink=req_q, credit_in=ack_q,
+                         probe_s=.2, poll_s=.05, timeout_s=150,
+                         clock=lambda: tx.now, tdr_agent=agent)
+    e._h_est = tx.h
+    agent.observe(tx.h, 0, 10 * GWEI)
+    e._tdr_plan()
+    assert e._tdr_items[0]["stage"] == "first_submitted"
+    return tx, e, agent, req_q
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_fast_ticks_do_not_postpone_burn_receipt_forever(status):
+    tx, e, agent, req_q = pending_tdr(status)
+    for step in range(601):
+        tx.now = step * .005   # Production loop is faster than the .2s probe period.
+        e._h_est = tx.h + int(tx.now)
+        e._tdr_poll()
+        if req_q.d or not e._tdr_items:
+            break
+    assert 1.0 <= tx.now < 1.5  # Receipt handled promptly, before the 20-block deadline.
+    assert all(b - a >= .2 - 1e-9 for a, b in zip(tx.probe_times, tx.probe_times[1:]))
+    if status == 0:
+        assert not req_q.d
+        assert e._ledger.available(1) == 200 * GWEI
+        assert e._ledger.confirmed == {0: 0, 1: 200 * GWEI}
+    else:
+        assert len(req_q.d) == 1
+        request = req_q.get_nowait()
+        assert e._ledger.confirmed == {0: 0, 1: 0}
+        e._acks[request["ref"]] = (1, 102)
+        e._tdr_poll()
+        assert e._ledger.confirmed == {0: 200 * GWEI, 1: 0}
+        assert agent.transfers_done == 1
+        assert len(e._tdr_move_events) == 1
+        assert not e._tdr_items
+
+
+def test_deadline_receipt_check_still_bypasses_normal_probe_schedule():
+    tx, e, agent, req_q = pending_tdr()
+    tx.now = 21
+    e._h_est = 121
+    e._tdr_items[0]["next_probe"] = 1000
+    e._tdr_poll()
+    assert len(tx.probe_times) == 1
+    assert len(req_q.d) == 1
+    assert e._tdr_items[0]["stage"] == "second_requested"
 
 
 def test_tdr_replenishes_drained_dst_shard():

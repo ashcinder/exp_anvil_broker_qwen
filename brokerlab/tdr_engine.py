@@ -44,16 +44,19 @@ class TdrAgent:
                  base_floor_frac: float = 0.05,
                  demand_ewma_half_life: float = 0.0,
                  demand_ewma_min_blocks: int = 5,
+                 demand_ewma_window_blocks: int = 0,
                  target_cap: float = 0.0,
                  min_reserve_wei: int = 0,
-                 surplus_epsilon: t.Optional[float] = None) -> None:
+                 surplus_epsilon: t.Optional[float] = None,
+                 topup_two_sided: bool = False) -> None:
         self.num_shards = int(num_shards)
-        # 需求源二选一：ewma_half_life>0 用指数平滑（τ 稳定实验），否则硬窗口。
+        # 需求源二选一：ewma_half_life>0 用指数平滑（可选有限滑窗），否则硬窗口。
         self.demand_ewma_half_life = float(demand_ewma_half_life)
         self.window = DemandWindow(window_blocks)
         self.ewma = EwmaDemand(half_life_blocks=float(demand_ewma_half_life)
                                if demand_ewma_half_life > 0 else 20.0,
-                               min_blocks=int(demand_ewma_min_blocks))
+                               min_blocks=int(demand_ewma_min_blocks),
+                               window_blocks=int(demand_ewma_window_blocks))
         self.epsilon = float(epsilon)
         self.q_min = float(q_min)
         self.chi_blocks = int(chi_blocks)
@@ -70,10 +73,14 @@ class TdrAgent:
         self.min_reserve_wei = int(min_reserve_wei)
         self.surplus_epsilon = (self.epsilon if surplus_epsilon is None
                                 else float(surplus_epsilon))
-        if not 0 <= self.epsilon < 1:
-            raise ValueError("epsilon must be in [0, 1)")
-        if not 0 <= self.surplus_epsilon < 1:
-            raise ValueError("surplus_epsilon must be in [0, 1)")
+        self.topup_two_sided = bool(topup_two_sided)
+        # Topup's epsilon=1 is a valid boundary control: its shortage
+        # threshold is zero. Other policies retain the existing domain.
+        epsilon_limit = 1.0 if self.policy == self.POLICY_TOPUP else None
+        if not (0 <= self.epsilon < 1 or self.epsilon == epsilon_limit):
+            raise ValueError("epsilon must be in [0, 1), or 1 for Topup")
+        if not (0 <= self.surplus_epsilon < 1 or self.surplus_epsilon == epsilon_limit):
+            raise ValueError("surplus_epsilon must be in [0, 1), or 1 for Topup")
         if not 0 <= self.q_min <= 1:
             raise ValueError("q_min must be in [0, 1]")
         if (self.target_cap < 0 or self.target_cap > 1
@@ -169,7 +176,8 @@ class TdrAgent:
                                  cap=self.target_cap)
             self.last_target = list(tau)
             plans = topup_plans(av, tau, self.epsilon,
-                                self.surplus_epsilon)
+                                self.surplus_epsilon,
+                                two_sided=self.topup_two_sided)
         else:
             if not self._req_ready(block):
                 return []                          # 冷启动保护：未满一个完整窗口

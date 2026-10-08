@@ -1,0 +1,21 @@
+{
+  "launched_at": "2026-10-07 11:49:17 +08:00",
+  "launcher_pid": 20116,
+  "wait_for_existing_pid": 47148,
+  "parameter_points": 11,
+  "rounds": 10,
+  "planned_trials": 110,
+  "stdout_log": "D:\\BaiduNetdiskDownload\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp029_added_parameter_sensitivity\\logs\\20261007_114917_stdout.log",
+  "stderr_log": "D:\\BaiduNetdiskDownload\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp029_added_parameter_sensitivity\\logs\\20261007_114917_stderr.log",
+  "command": [
+    "C:\\Users\\hzy\\.venvs\\brokerlab\\Scripts\\python.exe",
+    "-u",
+    "D:\\BaiduNetdiskDownload\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp029_added_parameter_sensitivity\\run.py",
+    "--wait-for-pid",
+    "47148"
+  ],
+  "status": "cancelled_by_user",
+  "stopped_pids": [
+    47364
+  ]
+}

@@ -57,12 +57,18 @@ def candidate_pool(cfg, count, *, skip=0):
 
     Deduplication includes the skipped prefix so held-out windows cannot reuse
     transaction IDs from training. Existing callers retain prefix semantics.
+    Optional destination_shard_filter selects genuine fixed-modulo transfers;
+    it never rewrites an address, transaction direction, or amount.
     """
     if count <= 0 or skip < 0:
         raise ValueError("count must be positive and skip nonnegative")
     out, reasons, seen = [], Counter(), set()
     floor = int(cfg.traffic.value_floor_eth * ETH)
     cap = int(cfg.traffic.value_cap_eth * ETH)
+    destination_filter = cfg.exp.get("destination_shard_filter")
+    if destination_filter is not None and (type(destination_filter) is not int
+            or not 0 <= destination_filter < cfg.chain.num_shards):
+        raise ValueError("destination_shard_filter must be a valid integer shard ID or null")
     with open(cfg.traffic.real_csv_path, newline="", encoding="utf-8-sig") as f:
         for line, row in enumerate(csv.DictReader(f), 2):
             reasons["raw_rows_scanned"] += 1
@@ -84,6 +90,10 @@ def candidate_pool(cfg, count, *, skip=0):
                 continue
             if not floor <= v <= cap:
                 reasons["amount_filtered"] += 1
+                continue
+            if destination_filter is not None and (bi % cfg.chain.num_shards != destination_filter
+                    or ai % cfg.chain.num_shards == destination_filter):
+                reasons["natural_destination_filtered"] += 1
                 continue
             sender = cfg.scale.user_base_index + ai % cfg.scale.num_users
             receiver = cfg.scale.user_base_index + bi % cfg.scale.num_users

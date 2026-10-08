@@ -60,6 +60,12 @@ def resolve(cfg, method):
             raise ValueError("train_candidates must leave a held-out pool")
         if not 0 < cfg.exp["max_receiver_address_fraction"] <= 1 or not 0 < cfg.exp["receiver_score_min"] <= 1 or cfg.exp["min_address_observations"] < 1:
             raise ValueError("Invalid receiving address selection settings")
+    if method == "natural" and type(cfg.exp.get("ordinary_only", False)) is not bool:
+        raise ValueError("exp.ordinary_only must be a boolean")
+    destination_filter = cfg.exp.get("destination_shard_filter")
+    if destination_filter is not None and (method != "natural" or type(destination_filter) is not int
+            or not 0 <= destination_filter < cfg.chain.num_shards):
+        raise ValueError("destination_shard_filter is only supported for natural fixed-modulo shard IDs")
     if method == "sampled":
         ratios = cfg.exp["direction_ratios"]
         if not ratios or any(not 0 < p < 1 for p in ratios) or len({round(p*100) for p in ratios}) != len(ratios):
@@ -72,7 +78,28 @@ def resolve(cfg, method):
         validate_two_shard_settings(cfg.exp["hotspot_fractions"], cfg.exp["direction_ratios"],
             cfg.exp["hotspot_shard_a"], cfg.exp["hotspot_shard_b"],
             cfg.exp["direction_seed"], cfg.exp["hot_selector_bits_per_address"])
-    arms = f"plain@{b},valve@{b}@{v},tdr@{b}@@{prop},topup@{b}@@{hard},topup@{b}@@{e}@@{h}"
+    method_tokens = dict(plain=f"plain@{b}", valve=f"valve@{b}@{v}",
+                         proportional=f"tdr@{b}@@{prop}", hard=f"topup@{b}@@{hard}",
+                         ewma=f"topup@{b}@@{e}@@{h}")
+    requested = cfg.exp.get("methods", list(method_tokens))
+    if (not isinstance(requested, list) or not requested
+            or any(not isinstance(name, str) or name not in method_tokens for name in requested)
+            or len(set(requested)) != len(requested)):
+        raise ValueError("exp.methods must be a nonempty unique list of plain, valve, proportional, hard, ewma")
+    sweep = cfg.exp.get("ewma_epsilons")
+    if sweep is not None:
+        if (not isinstance(sweep, list) or not sweep
+                or any(type(x) not in (int, float) or not math.isfinite(x)
+                       or not 0 <= x < 1 for x in sweep)
+                or len(set(sweep)) != len(sweep) or "ewma" not in requested):
+            raise ValueError("exp.ewma_epsilons must be a nonempty unique numeric list in [0, 1), with ewma enabled")
+    tokens = []
+    for name in requested:
+        if name == "ewma" and sweep is not None:
+            tokens.extend(f"topup@{b}@@{float(epsilon)}@@{h}" for epsilon in sweep)
+        else:
+            tokens.append(method_tokens[name])
+    arms = ",".join(tokens)
     cfg = replace(cfg, exp={**cfg.exp, "arms": arms}, broker=replace(cfg.broker, initial_balance_eth=b))
     return cfg, count
 
@@ -164,7 +191,7 @@ def fingerprint(cfg, method):
                     "min_address_observations", "direction_ratios", "background_fraction",
                     "control_probabilities", "control_seed", "hotspot_fractions",
                     "hotspot_shard_a", "hotspot_shard_b", "direction_seed",
-                    "hot_selector_bits_per_address") if k in cfg.exp})
+                    "hot_selector_bits_per_address", "ordinary_only", "destination_shard_filter") if k in cfg.exp})
 
 
 def prepare(cfg, method, directory):
@@ -224,9 +251,10 @@ def main(here, method, argv=None):
     scenario_count = (len(cfg.exp["control_probabilities"]) if method == "controlled" else
                       2 + len(cfg.exp["hotspot_fractions"])*len(cfg.exp["direction_ratios"])
                       if method == "two_shard" else
-                      1+len(cfg.exp["direction_ratios"]) if method == "sampled" else 3)
+                      1+len(cfg.exp["direction_ratios"]) if method == "sampled" else
+                      1 if method == "natural" and cfg.exp.get("ordinary_only", False) else 3)
     plan = dict(method=method, ctx_per_arm=count, sessions=cfg.exp["sessions"], scenarios=scenario_count,
-                arms=cfg.exp["arms"], total_ctx=count*5*scenario_count*cfg.exp["sessions"],
+                arms=cfg.exp["arms"], total_ctx=count*len(tags(cfg))*scenario_count*cfg.exp["sessions"],
                 ports=[cfg.chain.base_port,cfg.chain.base_port+15], gas_limit=cfg.chain.gas_limit,
                 params=to_params_dict(cfg))
     print(json.dumps(plan, ensure_ascii=False, indent=2), flush=True)

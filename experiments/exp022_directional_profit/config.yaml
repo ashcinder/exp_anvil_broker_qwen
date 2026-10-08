@@ -1,0 +1,79 @@
+label: exp022_directional_profit
+
+exp:
+  count: 15000
+  amount_eth: 0.02
+  source_shard: 0
+  target_shard: 1
+  balances_eth: 180
+  rate: 30
+  seed: 42
+  route_seed: 7
+  sender_window: 2
+  max_backlog: 20000
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 100
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  drain_tail_s: 3600
+  coordinator_mint_budget_eth_per_shard: 2000000
+  rss_cap_mb: 3000
+  match_ctrl_bytes: 100
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.10
+  tdr_q_min: 0.10
+  tdr_chi_blocks: 5
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 0
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0
+
+chain:
+  anvil_bin: null
+  mnemonic: myth like bonus scare over problem client lizard pioneer submit female collect
+  num_shards: 2
+  base_port: 13600
+  chain_id_base: 58000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 320
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 1
+  user_base_index: 200
+  num_users: 100
+
+broker:
+  initial_balance_eth: 180
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+
+b2e:
+  enabled: true
+  fee_share: 0.40
+  gas_units_per_ctx: 21000
+  ref_gas_price_wei: 100000000000
+  charges_rebalancing: false
+
+tdr:
+  enabled: true
+
+output:
+  results_root: results

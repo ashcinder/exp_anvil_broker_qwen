@@ -1,5 +1,28 @@
 """TdrAgent 状态机单测：互斥、χ、冷启动保护、超时→lost_in_transit。"""
 from brokerlab.tdr_engine import TdrAgent
+import pytest
+
+
+def test_topup_epsilon_one_is_a_no_shortage_trigger_boundary():
+    agent = TdrAgent(2, window_blocks=1, epsilon=1.0, q_min=0,
+                     chi_blocks=10, policy=TdrAgent.POLICY_TOPUP,
+                     demand_ewma_half_life=20, demand_ewma_min_blocks=1)
+    agent.observe(0, 1, 100)
+    for block in range(50):
+        assert agent.tick(block, [100, 0]) == []
+    assert agent.last_target == [0, 100]
+    assert agent.events_opened == 0
+
+
+def test_epsilon_one_remains_invalid_for_proportional_policy():
+    with pytest.raises(ValueError, match="epsilon"):
+        TdrAgent(2, epsilon=1.0)
+
+
+@pytest.mark.parametrize("epsilon", [-0.1, 1.01, float("nan")])
+def test_topup_rejects_epsilon_outside_closed_unit_interval(epsilon):
+    with pytest.raises(ValueError, match="epsilon"):
+        TdrAgent(2, epsilon=epsilon, policy=TdrAgent.POLICY_TOPUP)
 
 
 def _agent(**kw):
@@ -17,6 +40,16 @@ def test_ewma_observation_window_is_configurable():
     assert a._req_ready(2) is False
     a.observe(3, 0, 100)
     assert a._req_ready(3) is True
+
+
+def test_ewma_sliding_window_reaches_agent_demand():
+    a = _agent(policy=TdrAgent.POLICY_TOPUP,
+               demand_ewma_half_life=10,
+               demand_ewma_min_blocks=1,
+               demand_ewma_window_blocks=5)
+    a.observe(1, 0, 100)
+    a.observe(6, 1, 100)
+    assert a._req_demand(6)[0] == [0, 100, 0]
 
 
 def _prime(a, h_first=1):

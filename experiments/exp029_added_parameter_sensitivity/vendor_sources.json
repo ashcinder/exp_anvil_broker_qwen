@@ -1,0 +1,14 @@
+{
+  "pipeline.py": {
+    "copied_from": "experiments\\exp025_regime_shift_sensitivity\\pipeline.py",
+    "source_sha256": "f9ebcd34253bdb82786fc9c886806417d21609400b428d0a245e4316457b1705"
+  },
+  "tdr_engine.py": {
+    "copied_from": "brokerlab\\tdr_engine.py",
+    "source_sha256": "5d2e00691bd836c3383eb7d628bc4820723ab9b5b8adce028d5b685e16fe5c32"
+  },
+  "tdr_hook.py": {
+    "copied_from": "brokerlab\\tdr_hook.py",
+    "source_sha256": "f602b0d55b7936ca3a2ac766d8cb380327bcde557051278da3a4f54f79c1b1df"
+  }
+}

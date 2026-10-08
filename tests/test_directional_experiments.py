@@ -30,7 +30,10 @@ def row(i, source=1, dest=0, amount=ETH//10):
 def small_cfg(method="natural", count=10):
     c=cfg(method)
     return replace(c,scale=replace(c.scale,num_brokers=1),
-                   exp={**c.exp,"ctx_per_broker":count,"rate":1,"audit_window_blocks":2})
+                   traffic=replace(c.traffic,value_floor_eth=0.01,value_cap_eth=10.0),
+                   exp={**c.exp,"ctx_per_broker":count,"rate":1,"audit_window_blocks":2,
+                        "ordinary_only":False,"destination_shard_filter":None,"ewma_epsilons":None,
+                        "methods":["plain","valve","proportional","hard","ewma"]})
 
 
 def test_snapshot_preserves_and_reuses_source(tmp_path):
@@ -68,6 +71,76 @@ def test_natural_disjoint_windows_no_invented_rows():
         dw.ensure_order(rows)
         used.extend(r["ctx_id"] for r in rows)
     assert len(used)==len(set(used))
+
+
+def test_natural_ordinary_only_preserves_first_prefix_and_fixed_mapping():
+    c=small_cfg()
+    c.exp["ordinary_only"]=True
+    pool=[row(i,source=17,dest=32,amount=ETH+i) for i in range(15)]
+    scenarios,design=dw.natural_windows(pool,c,10)
+    assert len(scenarios)==1 and scenarios[0][0]=="ordinary"
+    name,selected,mapping,info=scenarios[0]
+    assert mapping=={} and selected==dw.mapped(pool)[:10]
+    assert all(r["src_shard"]==1 and r["dst_shard"]==0 for r in selected)
+    assert [r["amount_wei"] for r in selected]==[r["amount_wei"] for r in pool[:10]]
+    assert design["ordinary_only"] is True
+    with pytest.raises(ValueError,match="Insufficient natural cross-shard"):
+        dw.natural_windows(pool[:9],c,10)
+
+
+def test_natural_ordinary_flag_changes_prepared_fingerprint():
+    c=small_cfg()
+    before=de.fingerprint(c,"natural")
+    c.exp["ordinary_only"]=True
+    assert de.fingerprint(c,"natural")!=before
+
+
+def test_ewma_only_plan_preserves_funding_and_count():
+    c=small_cfg()
+    c.exp["methods"]=["ewma"]
+    resolved,count=de.resolve(c,"natural")
+    assert len(de.tags(resolved))==1
+    assert resolved.exp["arms"]==f"topup@{float(c.exp['balances_eth'])}@@{float(c.exp['ewma_epsilon'])}@@20.0"
+    assert count==10 and resolved.broker.initial_balance_eth==c.exp["balances_eth"]
+
+
+def test_ewma_epsilon_sweep_uses_four_distinct_arms_same_workload():
+    c=small_cfg()
+    c.exp["methods"]=["ewma"]
+    before=de.fingerprint(c,"natural")
+    c.exp["ewma_epsilons"]=[0.1,0.3,0.5,0.7]
+    resolved,count=de.resolve(c,"natural")
+    assert resolved.exp["arms"].split(",")==[
+        f"topup@45.0@@{epsilon}@@20.0" for epsilon in (0.1,0.3,0.5,0.7)]
+    assert len(de.tags(resolved))==4 and count==10
+    assert de.fingerprint(resolved,"natural")==before
+
+
+@pytest.mark.parametrize("values",[[],[0.1,0.1],[1.0],[-0.1],[True],["0.5"],[float("nan")]])
+def test_invalid_ewma_epsilon_sweep_rejected(values):
+    c=small_cfg()
+    c.exp["ewma_epsilons"]=values
+    with pytest.raises(ValueError,match="ewma_epsilons"):
+        de.resolve(c,"natural")
+
+
+def test_natural_destination_filter_preserves_raw_endpoints_values_order(tmp_path):
+    from brokerlab.mapped_workload import candidate_pool
+    import csv
+    c=small_cfg()
+    path=tmp_path/"raw.csv"
+    raw=[dict(transactionHash=f"h{i}",**{"from":hex(src),"to":hex(dst)},value=str(ETH+i))
+         for i,(src,dst) in enumerate([(1,11),(2,10),(11,27),(3,27),(4,43)])]
+    with path.open('w',newline='') as f:
+        w=csv.DictWriter(f,fieldnames=list(raw[0]));w.writeheader();w.writerows(raw)
+    c=replace(c,traffic=replace(c.traffic,real_csv_path=str(path)))
+    c.exp["destination_shard_filter"]=11
+    selected,reasons=candidate_pool(c,3)
+    assert [r['source_line'] for r in selected]==[2,5,6]
+    assert [(r['orig_from'],r['orig_to'],r['amount_wei']) for r in selected]==[
+        (raw[i]['from'],raw[i]['to'],int(raw[i]['value'])) for i in (0,3,4)]
+    assert reasons['natural_destination_filtered']==2
+    assert all(r['src_shard']!=11 and r['dst_shard']==11 for r in dw.mapped(selected))
 
 
 def test_learned_mapping_uses_only_train_and_is_role_invariant():
