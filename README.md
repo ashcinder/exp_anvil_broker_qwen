@@ -212,3 +212,31 @@ pytest tests/ -q
 ## 安全说明
 
 不要将 GitHub Token、私钥、账户密码、Trace 数据或实验机配置提交到仓库。若凭据曾出现在聊天记录、终端输出或日志中，应立即撤销并重新生成。
+
+## 参数网格与敏感性实验（exp030–exp032，2026-10 合入）
+
+由本地线合入的三个实验包。它们复用 `exp003` 的五方案管线（编排器模式），
+目录名带全部参数（token 语法 `name@fund@cap@eps@chi@hl@qmin`）。
+
+| 实验 | 主题 | 要点 |
+| --- | --- | --- |
+| 30 | 全功能开关矩阵 | 把 exp001–008 各自包按开关表逐子进程调用并聚合，产物 `matrix_report.json` |
+| 31 | 参数网格全量搜索 | ε 步长 0.05（18 点）、q_min 六档、hl 外延、EWMA 配对、主表刷新、稳定性补齐；每点 n=3，115 臂 |
+| 32 | 参数敏感性（突变注入） | 热点轮换负载下的 hl / q_min 敏感曲线（"微笑曲线"），含绘图与打包脚本 |
+
+对应交付包见 `submit_regime_shift/`（报告、数据表、复现脚本齐全）。
+
+## 文档索引
+
+- [EXPERIMENT_REPORT_CN.md](EXPERIMENT_REPORT_CN.md)：exp001–exp011 全量实验报告与结论。
+- [METHOD_final_CN.md](METHOD_final_CN.md)：定稿方法的数学表述与手稿改稿映射。
+- [EXPERIMENT_DESIGN_CN.md](EXPERIMENT_DESIGN_CN.md)：平台设计（分片/账户/机制/口径）。
+- [CODE_READING_GUIDE_CN.md](CODE_READING_GUIDE_CN.md)：逐文件代码阅读路线。
+- [REGIME_SHIFT_CN.md](REGIME_SHIFT_CN.md)：突变注入实验的完整说明。
+- [BUGS_20261009_CN.md](BUGS_20261009_CN.md)：问题清单与修复记录。
+- [Experiments 7 Bug.pdf](Experiments%207%20Bug.pdf)：anvil 出块竞态报告（已修复，见 `brokerlab/tx.py`）。
+- [../MERGE_PLAN_CN.md](../MERGE_PLAN_CN.md)：本次两仓合并的对比与执行记录。
+
+**数据位置说明**：`trace/`、各实验 `out/`、图源目录不随 Git 分发（见 `.gitignore`）。
+本地线的大体量产物（exp032 的 16 GB、exp031 的 1.6 GB 网格）保留在
+`exp_anvil_broker_qwen_local/` 原目录，按需单独传输。

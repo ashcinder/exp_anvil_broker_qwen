@@ -26,6 +26,9 @@ def grab(pat, cast=float):
         if not m:
             continue
         a = json.loads(f.read_text())["arms"][0]
+        # 未过守恒门的整跑不进图（与 final_table.py 同一口径）
+        if not (all(a["gates"].values()) and a["burn_reconcile"]["ok"]):
+            continue
         # 键必须转成数值：字符串键会被 matplotlib 当成分类轴
         got.setdefault(cast(m.group(1)), []).append(a["relayed"])
     return {k: (st.median(v), min(v), max(v), len(v)) for k, v in got.items()}
@@ -73,8 +76,10 @@ def main():
     ax[0].set_xlim(1.7, 600)
     ax[1].set_xlim(-0.04, 0.98)
 
+    # 样本数从数据里取（各点可能因剔除而未过门的整跑而略少）
+    n_rep = max(max(v[3] for v in hl.values()), max(v[3] for v in qm.values()))
     fig.suptitle("Both parameters show an interior optimum under the regime-shift "
-                 "load (n=3, median with min–max band)", fontsize=10)
+                 f"load (n={n_rep}, median with min–max band)", fontsize=10)
     out = OUT / "final_smile.png"
     save(fig, out)
     print(f"  figure: {out}")
