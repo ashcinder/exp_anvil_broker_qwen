@@ -1,0 +1,74 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp009 · exp001-008 全功能开关矩阵（编排器）
+# 每个 stage 是一个开关：enabled=false 即跳过。
+# overrides 是发给该包 run.py 的 --set 串（参数含义见各包 config.yaml）。
+# 本包不修改任何其它代码，只做：按序调用 → 收退出码 → 找产物目录 → 聚合报告。
+# profile=smoke 时，每 stage 额外并上 smoke_overrides（只压规模参数，
+# 不改各包的判据逻辑）。
+# ══════════════════════════════════════════════════════════════════════════
+label: exp030_full_matrix
+
+exp:
+  profile: smoke                     # smoke | full
+  stages:
+    exp001:
+      pkg: exp001_relay_vs_broker
+      enabled: true
+      expected_rc: [0]               # 机制对比：判据全过返回 0
+      overrides: []
+      smoke_overrides: []
+    exp002:
+      pkg: exp002_broker_drain_no_tdr
+      enabled: true
+      expected_rc: [0]
+      overrides: []
+      smoke_overrides: []
+    exp004:
+      pkg: exp004_b2e_revenue
+      enabled: true
+      expected_rc: [0]
+      overrides: []
+      smoke_overrides: []
+    exp005:
+      pkg: exp005_broker_substrate_benchmark
+      enabled: true
+      expected_rc: [0, 1]            # 线程拖负联合判据时返回 1，属预期结论
+      overrides: []
+      smoke_overrides: []
+    exp006:
+      pkg: exp006_rate_invariance
+      enabled: true
+      expected_rc: [0]
+      overrides: []
+      smoke_overrides:               # 只留 25/100 两档、缩规模
+        - exp.rates=25,100
+        - exp.ctx_per_broker=20
+        - exp.pool_scan=8000
+    exp007:
+      pkg: exp007_dynamic_routing
+      enabled: true
+      expected_rc: [0]
+      overrides: []
+      smoke_overrides:               # 单动态档，去静态对照
+        - exp.rates=40
+        - exp.static_rates=
+        - exp.ctx_per_broker=20
+    exp003:
+      pkg: exp003_tdr_on_off
+      enabled: true
+      expected_rc: [0]
+      overrides: []
+      smoke_overrides:               # 双臂 1200 笔、16 分片小池
+        - exp.ctx_per_broker=24
+        - exp.pool_scan=8000
+        - exp.rate=120
+        - chain.num_shards=16
+    exp008:
+      pkg: exp008_tdr_schedule_final
+      enabled: true
+      expected_rc: [0, 1]            # smoke 小档下 V3 物理下限判据无意义
+      overrides: []
+      smoke_overrides:
+        - exp.exp008_sessions=1
+        - exp.ctx_per_broker=24
+        - exp.pool_scan=8000

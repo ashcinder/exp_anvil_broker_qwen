@@ -1,0 +1,166 @@
+# ══════════════════════════════════════════════════════════════════════════
+# exp032 · 10W 口径参数敏感性（TDR 定稿调度）
+# 本体复用 exp008/exp003 管线（五方案同场）；本轮把每轮从 4W 笔拉到 10W 笔。
+# 用户 2026-09-28 裁定：ε / q_min / hl 三维度 × 每参数 20 点位 × 3 场；
+#   垫资沿用 exp008 正式档 150 ETH/片（不随 N 放大 ⇒ 紧张度是 exp008 的 2.5 倍）。
+# 速率必须在本机实测（calibrate_rate.py），不沿用文档里另一台机器的 120。
+# 臂 token 语法（exp003/008/010 一致）：name@fund@cap@eps@chi@hl@qmin
+# ══════════════════════════════════════════════════════════════════════════
+label: exp032_param_sensitivity
+
+exp:
+  # —— exp032 自有 ——
+  exp032_sessions: 3                 # 主表对比场数（每场 = 完整五方案同场）
+  # —— 10W 正式档（相对 exp008 的 4W 档，四处必须同步放大）——
+  rate: 120                          # 注入速率 CTX/逻辑块 ← 待本机定标回填
+  ctx_per_broker: 2000               # N = 50 × 2000 = 100000
+  pool_scan: 500000                  # 实测：200000 只凑出 71935 笔（不够 10W）；500000 可用 186460
+  group_cap_mult: 2.0
+  seed: 42                           # 全批次冻结：噪声=时序竞态，非流差异
+  route_seed: 7
+  balances_eth: 150                  # 沿用 exp008 正式档（用户裁定，不按 N 放大）
+  sender_window: 2
+  max_backlog: 50000                 # 4W 档是 20000；随 N 同比例放大（N 的一半）
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  drain_tail_s: 900                  # 让 coordinator deadline 不成为人为约束（4W 档是 420）
+  # —— TDR 参数（定稿，网格的"其余两维"固定值）——
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.1
+  tdr_q_min: 0.10
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 0.0            # 默认硬窗口；EWMA 由 token 的 hl 段开启
+  # —— 主表五方案同场（token 语法 name@fund@cap@eps@chi@hl@qmin）——
+  arms: "plain@150,valve@150@1.3,tdr@150@@0.1,topup@150@@0.1,topup@150@@0.95@@20"
+  exp032_relay_median_max: 150       # V2 门限。标定单场实测 relay=55 @10W（exp008 档是 20）；
+                                     # 沿用其 ~2.5× 口径 → 150。出数后可据 report.json 复核。
+  # —— 引擎公共 ——
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  coord_budget_mult: 6.0
+  rss_cap_mb: 9000
+
+  # —— 参数敏感性网格（每参数 20 点位；其余两维固定为定稿值 ε0.95/q0.10/hl20）——
+  # 每组 n=3 场，串行跑。
+  batches:
+    E1_eps_grid:                   # ε 0.05→1.00 步长0.05（含 1.0 失效悬崖）
+      reps: 3
+      arms:
+        - topup@150@@0.05@@20
+        - topup@150@@0.10@@20
+        - topup@150@@0.15@@20
+        - topup@150@@0.20@@20
+        - topup@150@@0.25@@20
+        - topup@150@@0.30@@20
+        - topup@150@@0.35@@20
+        - topup@150@@0.40@@20
+        - topup@150@@0.45@@20
+        - topup@150@@0.50@@20
+        - topup@150@@0.55@@20
+        - topup@150@@0.60@@20
+        - topup@150@@0.65@@20
+        - topup@150@@0.70@@20
+        - topup@150@@0.75@@20
+        - topup@150@@0.80@@20
+        - topup@150@@0.85@@20
+        - topup@150@@0.90@@20
+        - topup@150@@0.95@@20
+        - topup@150@@1.0@@20
+    Q1_qmin_grid:                  # q_min 0→0.19 步长0.01（含 0 无保险对照）
+      reps: 3
+      arms:
+        - topup@150@@0.95@@20@0.00
+        - topup@150@@0.95@@20@0.01
+        - topup@150@@0.95@@20@0.02
+        - topup@150@@0.95@@20@0.03
+        - topup@150@@0.95@@20@0.04
+        - topup@150@@0.95@@20@0.05
+        - topup@150@@0.95@@20@0.06
+        - topup@150@@0.95@@20@0.07
+        - topup@150@@0.95@@20@0.08
+        - topup@150@@0.95@@20@0.09
+        - topup@150@@0.95@@20@0.10
+        - topup@150@@0.95@@20@0.11
+        - topup@150@@0.95@@20@0.12
+        - topup@150@@0.95@@20@0.13
+        - topup@150@@0.95@@20@0.14
+        - topup@150@@0.95@@20@0.15
+        - topup@150@@0.95@@20@0.16
+        - topup@150@@0.95@@20@0.17
+        - topup@150@@0.95@@20@0.18
+        - topup@150@@0.95@@20@0.19
+    H1_hl_grid:                    # hl 近端加密看拐点、远端粗看平台
+      reps: 3
+      arms:
+        - topup@150@@0.95@@2
+        - topup@150@@0.95@@3
+        - topup@150@@0.95@@4
+        - topup@150@@0.95@@5
+        - topup@150@@0.95@@6
+        - topup@150@@0.95@@8
+        - topup@150@@0.95@@10
+        - topup@150@@0.95@@12
+        - topup@150@@0.95@@14
+        - topup@150@@0.95@@16
+        - topup@150@@0.95@@18
+        - topup@150@@0.95@@20
+        - topup@150@@0.95@@24
+        - topup@150@@0.95@@28
+        - topup@150@@0.95@@32
+        - topup@150@@0.95@@40
+        - topup@150@@0.95@@48
+        - topup@150@@0.95@@56
+        - topup@150@@0.95@@64
+        - topup@150@@0.95@@80
+
+chain:
+  anvil_bin: null
+  mnemonic: "myth like bonus scare over problem client lizard pioneer submit female collect"
+  num_shards: 16
+  base_port: 8600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+
+broker:
+  initial_balance_eth: 150
+  relay_mint_budget_eth: 1000
+
+traffic:
+  kind: real_csv
+  real_csv_path: null
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+
+b2e:
+  enabled: false
+
+tdr:
+  enabled: true
+
+output:
+  results_root: results

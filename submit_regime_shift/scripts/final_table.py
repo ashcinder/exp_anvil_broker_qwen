@@ -45,21 +45,26 @@ def med(v):
 
 def table(doc, print_lines, title, got, sort_key, xlabel):
     doc += [f"\n### {title}\n",
-            f"| {xlabel} | relay 中位 [区间] | n | 搬量中位 ETH | 事件中位 | 段占比 |",
-            "|---|---|---|---|---|---|"]
+            f"| {xlabel} | n | relay 中位 [区间] | 搬运次数中位 [区间] | 搬量中位 [区间] ETH |",
+            "|---|---|---|---|---|"]
     print_lines.append(f"\n--- {title} ---")
     for k in sorted(got, key=sort_key):
-        v = got[k]
-        rl = [x["relay"] for x in v]
-        rng = f"[{min(rl)}..{max(rl)}]" if len(rl) > 1 else "—"
-        flags = "" if all(x["ok"] for x in v) else "  **gates FAIL**"
-        line = (f"| {k} | {med(rl):.1f} {rng} | {len(v)} | "
-                f"{med([x['moved'] for x in v]):,.0f} | "
-                f"{med([x['events'] for x in v]):.0f} | "
-                f"{med([x['legs'] for x in v]):.3f} |{flags}")
-        doc.append(line)
-        print_lines.append(f"  {k:<8} relay {med(rl):6.1f} {rng:<12} n={len(v)} "
-                           f"搬量 {med([x['moved'] for x in v]):10,.0f}{flags}")
+        raw = got[k]
+        v = [x for x in raw if x["ok"]]        # 未过守恒门的整跑剔除
+        if not v:
+            continue
+        flags = f"  （剔除 {len(raw)-len(v)} 次未过门）" if len(v) < len(raw) else ""
+        def cell(key, fmt="{:.0f}"):
+            xs = [x[key] for x in v]
+            rng = f"[{fmt.format(min(xs))}..{fmt.format(max(xs))}]" \
+                  if len(xs) > 1 else "—"
+            return f"{fmt.format(med(xs))} {rng}"
+        rl = cell("relay")
+        tr = cell("transfers")
+        mv = cell("moved", "{:,.0f}")
+        doc.append(f"| {k} | {len(v)} | {rl} | {tr} | {mv} |{flags}")
+        print_lines.append(f"  {k:<8} n={len(v)} relay {rl:<16} "
+                           f"搬运 {tr:<16} 搬量 {mv}{flags}")
 
 
 def main():
@@ -76,6 +81,14 @@ def main():
            "轮次在外层交错，抵消机器状态的批次漂移。"]
 
     # 一、TDR 有效性
+    # 未过守恒门的整跑一律剔除（实测 96 组里有 1 组）
+    allruns = [x for pat in (r"(plain|valve|proportional)", r"hl(\d+)_r\d",
+                             r"q([0-9.]+)_r\d")
+               for xs in rows(pat).values() for x in xs]
+    dropped = [x for x in allruns if not x["ok"]]
+    if dropped:
+        print(f"  剔除 {len(dropped)} 次未过守恒门的运行"
+              f"（其中 relay 值：{[d['relay'] for d in dropped]}）")
     base = rows(r"(plain|valve|proportional)")
     doc += ["\n## 一、TDR 有效性（同一闪烁负载）\n",
             "| 方案 | relay 中位 [区间] | n | 搬量中位 ETH | 段占比 |",
@@ -94,15 +107,15 @@ def main():
                    f"{med([x['legs'] for x in v]):.3f} |")
 
     # 代表臂：hl=10、q_min=0.3 —— 两条曲线的最低点交汇处
-    rep = rows(r"hl(10)_r\d")
-    if "10" in rep:
-        v = rep["10"]
+    rep = rows(r"hl(20)_r\d")
+    if "20" in rep:
+        v = rep["20"]
         rl = [x["relay"] for x in v]
         rng = f"[{min(rl)}..{max(rl)}]"
-        doc.append(f"| **topup+EWMA (hl=10, q_min=0.3)** | **{med(rl):,.0f} {rng}** "
+        doc.append(f"| **topup+EWMA (hl=20, q_min=0.3)** | **{med(rl):,.0f} {rng}** "
                    f"| {len(v)} | **{med([x['moved'] for x in v]):,.0f}** | "
                    f"{med([x['legs'] for x in v]):.3f} |")
-        P.append(f"  topup+EWMA(hl10,q0.3) relay {med(rl):6.0f} {rng} n={len(v)}")
+        P.append(f"  topup+EWMA(hl20,q0.3) relay {med(rl):6.0f} {rng} n={len(v)}")
 
     table(doc, P, "二、hl 曲线（q_min=0.3 固定）",
           rows(r"hl(\d+)_r\d"), lambda s: int(s), "hl")
