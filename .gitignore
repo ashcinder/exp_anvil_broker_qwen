@@ -1,5 +1,7 @@
 # 原始数据与实验产物不进入 Git（大型 trace 请在机器之间单独传输）
 trace/
+# 指向别处 trace 的软链（本机跑实验用；git 把软链当文件，trace/ 规则匹配不到）
+trace
 results/
 exp_figure_origin/
 exp_figure_origin_qwen/

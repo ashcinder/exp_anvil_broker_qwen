@@ -151,7 +151,9 @@ def assemble(run, manifest, cfg, workload):
             write_json(directory / "summary.json", dict(params=docs[0]["params"], arms=[d["arms"][0] for d in docs],
                                                           status={"complete": True}))
             sessions.append(dict(index=rep, path=str(directory.relative_to(run)), route_seed=current[0]["route_seed"]))
-    report = dict(experiment=manifest["experiment"], params=to_params_dict(cfg),
+    report = dict(experiment=manifest["experiment"],
+                  formal=bool(manifest.get("formal", not manifest.get("smoke"))),
+                  params=to_params_dict(cfg),
                   status={"complete": complete, "expected_arms": list(dict.fromkeys(t["tag"] for t in manifest["tasks"]))},
                   session_runs=sessions, total_ctx_per_arm=len(workload), repetitions=cfg.exp["repetitions"],
                   workload_sha256=workload_hash, completed_tasks=len(records), planned_tasks=len(manifest["tasks"]),
@@ -171,9 +173,16 @@ def main(here, kind):
     parser.add_argument("--output-root", type=Path, default=here/"out")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--smoke", action="store_true", help="80 CTX, 1 broker, 1 round; outputs labeled smoke")
+    parser.add_argument("--rounds", type=int, default=None,
+                        help="分析档：显式覆盖场次数（少于正式档即标注为非正式，供先看效果用）")
     parser.add_argument("--no-plot", action="store_true")
     args = parser.parse_args()
     cfg = apply_overrides(load_config(args.config), args.set)
+    # 分析档（--rounds）：允许先用少于正式档的场次看效果；正式跑不得使用，
+    # 且产物在 report.json/manifest.json 里显式标记为非正式，防止误引用。
+    reduced = args.rounds is not None and kind != "exp025"
+    if reduced:
+        cfg = apply_overrides(cfg, [f"exp.repetitions={args.rounds}"])
     space = yaml.safe_load(args.space.read_text(encoding="utf-8")) if kind == "exp025" else None
     if args.only:
         if kind != "exp025":
@@ -191,10 +200,17 @@ def main(here, kind):
         if kind == "exp026":
             cfg = apply_overrides(cfg, ["exp.arms=plain@5,topup@5@@0.95@@20@0.3", "exp.profit_broker_idx=0"])
     expected = cfg.scale.num_brokers * int(cfg.exp["ctx_per_broker"])
-    required_ctx = 40000 if kind == "exp025" else 80000
-    required_rounds = 10 if kind == "exp025" else 1
-    if not args.smoke and (expected != required_ctx or int(cfg.exp["repetitions"]) != required_rounds):
+    # 每个实验的正式档规模（CTX/臂, 场次）。exp033 与 exp025 同规模同路由种子，
+    # 这样 SOTA 对照点与已发表的 TDR/plain 点落在同一条负载上，可直接比。
+    requirements = {"exp025": (40000, 10), "exp026": (80000, 1), "exp033": (40000, 3)}
+    if kind not in requirements:
+        raise ValueError(f"Unknown experiment kind {kind!r}")
+    required_ctx, required_rounds = requirements[kind]
+    if not args.smoke and not reduced and (expected != required_ctx
+                                           or int(cfg.exp["repetitions"]) != required_rounds):
         raise ValueError(f"Formal {kind} requires {required_ctx} CTX per arm and {required_rounds} rounds; use --smoke for checks")
+    if reduced and expected != required_ctx:
+        raise ValueError(f"Analysis pass still needs {required_ctx} CTX per arm")
     tasks = tasks_for(cfg, kind, space)
     signature = digest(dict(params=to_params_dict(cfg), space=space, kind=kind, smoke=args.smoke))
     print(f"{kind}: {len(tasks)} arm runs x {expected} CTX = {len(tasks)*expected:,}; serial; smoke={args.smoke}", flush=True)
@@ -209,7 +225,9 @@ def main(here, kind):
             raise ValueError("Resume configuration, grid or source code changed; start a new run")
     else:
         run.mkdir(parents=True)
-        manifest = dict(experiment=kind, smoke=args.smoke, signature=signature, source_files=source_fingerprint(),
+        manifest = dict(experiment=kind, smoke=args.smoke,
+                        analysis_pass=bool(reduced), formal=not (args.smoke or reduced),
+                        signature=signature, source_files=source_fingerprint(),
                         total_ctx_per_arm=expected, repetitions=cfg.exp["repetitions"], sweep_space=space, tasks=tasks)
     workload, total_wei = pipeline.build_workload(cfg, run)
     if args.resume and manifest["workload_sha256"] != digest(workload):

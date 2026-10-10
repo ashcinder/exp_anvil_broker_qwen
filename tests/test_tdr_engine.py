@@ -103,10 +103,11 @@ def test_first_timeout_no_loss_second_failed_is_lost():
         a.mark_second_submitted(1)
         a.sweep_timeouts(99)                    # 第二段不再被 sweep 判死
         assert a.lost_in_transit_wei == 0
-        a.fail(1, "second_failed")              # coordinator 明确回 0 才算损耗
+        a.fail(1, "second_failed", 77)          # coordinator 明确回 0 才算损耗
         assert a.lost_in_transit_wei == plans[1][2]
         assert a.transfers_lost == 1
-        assert a.lost_moves == [(plans[1][0], plans[1][1], plans[1][2])]
+        # 判失的搬运必须带 burn 块高：那笔 burn 已上链，对账要按它定位
+        assert a.lost_moves == [(plans[1][0], plans[1][1], plans[1][2], 77)]
     a.mark_second_submitted(0) if a.active else None
     assert a.state == TdrAgent.ST_IDLE          # 全终态即关事件
     assert a.snapshot()["events_opened"] == 1

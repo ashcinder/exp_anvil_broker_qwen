@@ -749,8 +749,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                        "drain_tail_s": exp_param(cfg, "drain_tail_s", float)})
         tdr_params = None
         if engine != "plain":
-            pol = {"proportional": "proportional", "valve": "valve",
-                   "base": "base", "topup": "topup"}.get(engine, engine)
+            pol, extra_pol = _POLICY_TABLE.get(engine, (engine, {}))
             tdr_params = {
                 "num_shards": cfg.chain.num_shards,
                 "window_blocks": exp_param(cfg, "tdr_window_blocks", int),
@@ -776,7 +775,22 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                 "demand_ewma_min_blocks": int(cfg.exp.get("tdr_ewma_min_blocks", 5)),
                 "demand_ewma_window_blocks": int(cfg.exp.get("tdr_ewma_window_blocks", 0)),
                 "topup_two_sided": bool(cfg.exp.get("tdr_ewma_two_sided", False)),
+                # —— SOTA 对照臂旋钮（缺键取默认值；非对应策略时不读取）——
+                # spider：流水触发阈值 = 该倍数 × broker 总资本 n×C。
+                # 文献原值是"每 10,000e 均衡一次"，绝对单位与本平台不可比，
+                # 故换算成相对自身资本的比例（见 exp033/README.md §标定）。
+                "spider_vol_wei": int(exp_param(cfg, "balances_eth", float)
+                                      * ETH * cfg.chain.num_shards
+                                      * float(cfg.exp.get("sota_spider_vol_mult",
+                                                          0.25))),
+                "autoloop_low": float(cfg.exp.get("sota_autoloop_low", 0.3)),
+                "autoloop_high": float(cfg.exp.get("sota_autoloop_high", 0.7)),
+                "loopmax_horizon_blocks": float(
+                    cfg.exp.get("sota_loopmax_horizon_blocks", 0.0)),
+                "loopmax_safety_blocks": float(
+                    cfg.exp.get("sota_loopmax_safety_blocks", 3.0)),
             }
+            tdr_params.update(extra_pol)
         cfg_plain = {"chain": asdict(cfg.chain), "scale": asdict(cfg.scale)}
         init_wei = int(fund_eth * ETH)
         # fig6c 消融：frac<1 时只有抽中的 broker 装 TDR，其余为动态 plain 引擎
@@ -1034,15 +1048,41 @@ def make_figure(out_root, results):
     print(f"  figure: {figs / 'exp003_tdr.png'}")
 
 
+# arm 名 → 引擎键。SOTA 对照臂（exp033）的决策规则在 sota_policies.py，
+# 它们的名字直接就是引擎键；policy 名与附加参数的映射见 _POLICY_TABLE。
+_ARM_ENGINE = {"plain": "plain", "tdr": "proportional", "valve": "valve",
+               "base": "base", "topup": "topup",
+               "flexichain": "flexichain", "loopmax": "loopmax",
+               "spider": "spider", "pnps": "pnps", "autoloop": "autoloop",
+               "overpass_u": "overpass_u", "overpass_d": "overpass_d",
+               "ucrb": "ucrb"}
+
+# 引擎键 → (TdrAgent 的 policy 名, 传给引擎的附加 tdr_params)
+_POLICY_TABLE = {
+    "proportional": ("proportional", {}),
+    "valve": ("valve", {}),
+    "base": ("base", {}),
+    "topup": ("topup", {}),
+    "flexichain": ("flexichain", {}),
+    "loopmax": ("loopmax", {}),
+    "spider": ("spider_vol", {}),
+    "pnps": ("pnps_static", {}),
+    "autoloop": ("autoloop", {}),
+    "overpass_u": ("overpass_qp", {"overpass_theta": "uniform"}),
+    "overpass_d": ("overpass_qp", {"overpass_theta": "demand"}),
+    "ucrb": ("ucrb", {}),
+}
+
+
 def _arm_spec(token):
     """把臂 token 解析成 (name, engine, fund_eth, cap_mult, eps, chi, hl)。
-    token 形如 plain/tdr/valve/base/topup，后缀 @fund @cap @eps @chi @hl @qmin：
-      cap 仅 valve；eps 仅 demand 类策略；chi 事件间隔；hl EWMA 半衰期；
-      qmin 覆盖 τ 地板比例。fund=None ⇒ 用 cfg 的 balances_eth。"""
+    token 形如 plain/tdr/valve/base/topup（以及 exp033 的 SOTA 臂名），
+    后缀 @fund @cap @eps @chi @hl @qmin：
+      cap 仅 valve；eps 事件死区（overpass 用它做触发阈值）；chi 事件间隔；
+      hl EWMA 半衰期；qmin 覆盖 τ 地板比例。fund=None ⇒ 用 cfg 的 balances_eth。"""
     parts = token.split("@")
     name = parts[0]
-    engine = {"plain": "plain", "tdr": "proportional", "valve": "valve",
-              "base": "base", "topup": "topup"}.get(name, "plain")
+    engine = _ARM_ENGINE.get(name, "plain")
     fund = float(parts[1]) if len(parts) > 1 and parts[1] else None
     cap = float(parts[2]) if len(parts) > 2 and parts[2] else None
     eps = float(parts[3]) if len(parts) > 3 and parts[3] else None

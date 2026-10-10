@@ -53,8 +53,21 @@ class TdrDynamicEngine(DynamicBrokerEngine):
     def _after_ctx_submitted(self, f) -> None:
         super()._after_ctx_submitted(f)
         if self.tdr is not None:
+            # src 分片一并交出：loopmax 需要净需求 Â_net（流入−流出）才能算 ETTD。
+            # 其余策略忽略该参数，语义与旧版逐位相同。
             self.tdr.observe(f.b1_anchor, int(f.ctx["dst_shard"]),
-                             int(f.ctx["amount_wei"]))
+                             int(f.ctx["amount_wei"]),
+                             src_shard=int(f.ctx["src_shard"]))
+
+    def _submit_relay(self, c: t.Dict[str, t.Any], now: float) -> None:
+        """终审改判 relay 是 ucrb 的唯一输入：把"这一笔为什么没服务成"的
+        缺口（金额 − 该分片可用额）如实回报给策略。其余策略忽略。"""
+        super()._submit_relay(c, now)
+        if self.tdr is not None:
+            dst = int(c["dst_shard"])
+            gap = int(c["amount_wei"]) - max(0, self._ledger.available(dst))
+            if gap > 0:
+                self.tdr.notify_shortfall(dst, gap)
 
     # ------------------------------------------------------------------
     def tick_once(self) -> None:
@@ -197,7 +210,8 @@ class TdrDynamicEngine(DynamicBrokerEngine):
                         })
                     else:
                         tr["stage"] = "failed"
-                        self.tdr.fail(i, "second_failed")   # burn 已落 → 记损耗
+                        # burn 已落 → 记损耗；带上已实测的 burn 块高供对账
+                        self.tdr.fail(i, "second_failed", tr.get("burn_block"))
             elif (tr["stage"] == "failed" and tr.get("ref")
                     and tr.get("first_confirmed")):
                 # 超时判负 ≠ 链上失败：迟到的 mint 回执照样落账（账本追链，不追丢钱）
@@ -278,7 +292,15 @@ def tdr_engine_from_payload(payload: t.Mapping[str, t.Any],
                      min_reserve_wei=int(tp.get("min_reserve_wei", 0)),
                      surplus_epsilon=float(tp.get("surplus_epsilon",
                                                    tp["epsilon"])),
-                     topup_two_sided=bool(tp.get("topup_two_sided", False)))
+                     topup_two_sided=bool(tp.get("topup_two_sided", False)),
+                     spider_vol_wei=int(tp.get("spider_vol_wei", 0)),
+                     autoloop_low=float(tp.get("autoloop_low", 0.3)),
+                     autoloop_high=float(tp.get("autoloop_high", 0.7)),
+                     loopmax_horizon_blocks=float(
+                         tp.get("loopmax_horizon_blocks", 0.0)),
+                     loopmax_safety_blocks=float(
+                         tp.get("loopmax_safety_blocks", 3.0)),
+                     overpass_theta=str(tp.get("overpass_theta", "uniform")))
     return TdrDynamicEngine(
         tx, users,
         broker_idx=int(payload["broker_idx"]),
