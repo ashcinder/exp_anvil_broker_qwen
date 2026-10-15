@@ -9,7 +9,7 @@ from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
 
-REVISION = 'exp040-off-exp041-on-v3'
+REVISION = 'exp040-on-exp041-off-v4'
 ETH = 10**18
 
 

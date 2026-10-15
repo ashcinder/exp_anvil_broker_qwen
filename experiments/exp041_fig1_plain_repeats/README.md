@@ -1,12 +1,12 @@
-# 实验40：Motivation 与 TDR_OFF 收益阴影折线图
+# 实验41：Motivation 与 TDR_OFF 收益阴影折线图
 
-固定关闭TDR，独立运行10轮，为Fig1提供带误差帽的broker/relay堆叠柱，以及未开启TDR的broker收益与潜在收益上限阴影折线。实验41单独执行TDR_ON资金/交易规模扫描。
+固定关闭TDR，独立运行10轮，为Fig1提供带误差帽的broker/relay堆叠柱，以及未开启TDR的broker收益与潜在收益上限阴影折线。实验40单独执行TDR_ON资金/交易规模扫描。
 
 ## 参数
 
 16分片、50broker、200用户；每个broker每个分片子账户45ETH；每轮40,000用户CTX，共10次、400,000CTX。1秒/块、释放120CTX/块、sender_window=2；route_seed依次7、17、…、97。每轮独立起链，实际引擎plain、tdr.enabled=false，搬运数必须为0。
 
-从ETH_cleaned选出200k母工作流后取40k前缀，与实验41的基准输入相同；第12,000笔后每1,600笔在目的热点11/3间切换，避免同分片。真实trace选流加人工方向压力，不等于主网原始时间顺序。种子重复反映动态路由/执行差异，不是独立trace。
+从ETH_cleaned选出200k母工作流后取40k前缀，与实验40的基准输入相同；第12,000笔后每1,600笔在目的热点11/3间切换，避免同分片。真实trace选流加人工方向压力，不等于主网原始时间顺序。种子重复反映动态路由/执行差异，不是独立trace。
 
 ## 收益与图
 
@@ -21,22 +21,22 @@
 从仓库根目录，安装requirements.txt及Foundry/anvil，准备被Git忽略的trace/ETH_cleaned.csv：
 
 ```powershell
-python experiments/exp040_motivation_tdr_off/run.py --dry-run
-python experiments/exp040_motivation_tdr_off/run.py --smoke
-python experiments/exp040_motivation_tdr_off/run.py
+python experiments/exp041_fig1_plain_repeats/run.py --dry-run
+python experiments/exp041_fig1_plain_repeats/run.py --smoke
+python experiments/exp041_fig1_plain_repeats/run.py
 ```
 
 smoke为2分片2broker、40CTX×2轮，标SMOKE；正式模式是10轮。可先用--prepare-only --no-plot只准备数据，或--max-tasks 1 --no-plot仅执行首轮。
 
 ```powershell
-python experiments/exp040_motivation_tdr_off/run.py --resume '本实验完整运行目录'
-python experiments/exp040_motivation_tdr_off/analyze.py --source '本实验完整运行目录'
+python experiments/exp041_fig1_plain_repeats/run.py --resume '本实验完整运行目录'
+python experiments/exp041_fig1_plain_repeats/analyze.py --source '本实验完整运行目录'
 ```
 
 续跑保留首次--smoke/--rounds/--set；源码、配置、工作流或数据变更拒绝续跑，失败重试另开attempt。未完成结果仅能通过--allow-partial生成显式标记的探索图。
 
 产物在本目录out/<时间戳>/：独立manifest/report、每轮原始CTX/TDR台账、per_broker.csv、revenue_curve.csv、figs/fig1a_tdr_off.png/.pdf、逐轮分箱/均值SD CSV、fig1b_broker_19.png/.pdf及system版。
 
-本入口共享相邻实验41的执行/记账代码，因此迁移时保留两个目录。两实验共享端口45940的串行锁；实验41运行时本实验拒绝启动，反之亦然。不要改锁端口绕过同机串行保护。
+本入口共享相邻实验40的执行/记账代码，因此迁移时保留两个目录。两实验共享端口45940的串行锁；实验40运行时本实验拒绝启动，反之亦然。不要改锁端口绕过同机串行保护。
 
-本仓库编号为40=OFF、41=ON。早期本地exp041_fig1_plain_repeats目录属于上传前命名，不要用该旧名替换当前入口或混合manifest。
+本仓库统一编号为40=TDR_ON、41=TDR_OFF，与最初本地实验目录一致。上一版上传时编号相反，勿混用旧目录或manifest。

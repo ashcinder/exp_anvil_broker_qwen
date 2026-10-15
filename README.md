@@ -213,9 +213,9 @@ pytest tests/ -q
 
 不要将 GitHub Token、私钥、账户密码、Trace 数据或实验机配置提交到仓库。若凭据曾出现在聊天记录、终端输出或日志中，应立即撤销并重新生成。
 
-## 实验40/41：Motivation与收益敏感性
+## 实验40/41：收益敏感性与Motivation
 
-- [实验40：Motivation + TDR_OFF阴影折线](experiments/exp040_motivation_tdr_off/README.md)：固定45ETH/子账户、40k交易，关闭TDR重复10轮；输出Fig1带标准差误差帽的broker/relay柱图和收入/潜在上限阴影曲线。
-- [实验41：TDR_ON余额和交易数敏感性](experiments/exp041_tdr_on_sensitivity/README.md)：10档余额、8档规模，各10轮，共享基准去重后170次；输出broker收入及净收益金额箱线图。
+- [实验40：TDR_ON余额和交易数敏感性](experiments/exp040_liquidity_scale/README.md)：10档余额、8档规模，各10轮，共享基准去重后170次；输出broker收入及净收益金额箱线图。
+- [实验41：Motivation + TDR_OFF阴影折线](experiments/exp041_fig1_plain_repeats/README.md)：固定45ETH/子账户、40k交易，关闭TDR重复10轮；输出Fig1带标准差误差帽的broker/relay柱图和收入/潜在上限阴影曲线。
 
 从仓库根目录运行，先用 `--dry-run` 查看计划。两实验共享运行锁，请串行执行；trace数据和实验输出不上传Git。

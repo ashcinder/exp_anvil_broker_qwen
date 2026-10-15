@@ -1,6 +1,6 @@
-# 实验41：TDR_ON 资金与交易规模参数敏感性
+# 实验40：TDR_ON 资金与交易规模参数敏感性
 
-只开启Topup+EWMA，研究broker赚多少钱，为Fig5b/c生成金额箱线图。没有TDR_OFF对照任务；OFF的Motivation和收益阴影图在独立实验40。
+只开启Topup+EWMA，研究broker赚多少钱，为Fig5b/c生成金额箱线图。没有TDR_OFF对照任务；OFF的Motivation和收益阴影图在独立实验41。
 
 | 扫描 | 取值 | 固定条件 | 运行次数 |
 |---|---|---|---|
@@ -22,32 +22,32 @@ Fig5b/c主图纵轴为净收益金额（以F为单位），另输出手续费收
 
 真实ETH_cleaned筛选金额.01～10ETH、排除合约端点；候选从400k扩至最多3.2m，目标不足时失败。统一先选200k母工作流，各N取前缀，第12,000笔后每1,600笔在目的热点11/3间轮换、避免同片。因此10k尚未进入热点阶段；改变N是在固定速率/热点节奏下增加运行长度。
 
-实验40采用相同母流设计。相同输入/种子不保证动态匹配到同编号broker的交易集合相同；各臂按自己的实际指派计算上限。不同轮次是固定trace下的路由与执行重复，不代表跨独立负载的泛化。
+实验41采用相同母流设计。相同输入/种子不保证动态匹配到同编号broker的交易集合相同；各臂按自己的实际指派计算上限。不同轮次是固定trace下的路由与执行重复，不代表跨独立负载的泛化。
 
 ## 运行
 
 在仓库根目录安装requirements.txt和Foundry/anvil，并准备trace/ETH_cleaned.csv：
 
 ```powershell
-python experiments/exp041_tdr_on_sensitivity/run.py --dry-run
-python experiments/exp041_tdr_on_sensitivity/run.py --smoke
-python experiments/exp041_tdr_on_sensitivity/run.py
+python experiments/exp040_liquidity_scale/run.py --dry-run
+python experiments/exp040_liquidity_scale/run.py --smoke
+python experiments/exp040_liquidity_scale/run.py
 ```
 
 smoke为2分片2broker、3次/160CTX，标SMOKE。--prepare-only --no-plot只选流；--max-tasks 2 --no-plot执行原计划前两次后暂停，仍保留完整十轮计划。资源上限为backlog240k、排空预算7200秒、RSS12GB，超限记失败，不伪装成正常结果或实测耗时。
 
 ```powershell
-python experiments/exp041_tdr_on_sensitivity/run.py --only balance
-python experiments/exp041_tdr_on_sensitivity/run.py --only transactions
-python experiments/exp041_tdr_on_sensitivity/run.py --resume '本实验完整运行目录'
-python experiments/exp041_tdr_on_sensitivity/analyze.py --source '本实验完整运行目录'
-python -m pytest experiments/exp041_tdr_on_sensitivity/test_design.py -q
+python experiments/exp040_liquidity_scale/run.py --only balance
+python experiments/exp040_liquidity_scale/run.py --only transactions
+python experiments/exp040_liquidity_scale/run.py --resume '本实验完整运行目录'
+python experiments/exp040_liquidity_scale/analyze.py --source '本实验完整运行目录'
+python -m pytest experiments/exp040_liquidity_scale/test_design.py -q
 ```
 
 仅余额100次，仅规模80次；分开运行时共同基准各执行一次。续跑保留首次--only/--rounds/--set/--smoke；数据、配置和源码指纹变更拒绝续跑，重试另开attempt不覆盖失败数据。--rounds可生成标EXPLORATORY的减少轮次计划。
 
 产物在本目录out/<时间戳>/：独立manifest/report、冻结工作流哈希、每任务有效配置、CTX/TDR台账、每broker收入及净收益、figs/fig5b_broker_19.*、fig5c_broker_19.*，以及_fee_income和system版本。箱体Q1–Q3、中位线、1.5IQR须及逐轮散点，标实际n。基准10轮可复用Fig5a收入/潜在上限均值±样本SD曲线，不增加实验。
 
-两实验共享45940端口锁，必须串行执行；实验40仍运行时，本实验拒绝启动。完整源码与当前工作流都来自本仓库，不需要作者机器上的C/D盘副本。可用--backend-root选择另一份完整兼容工程，默认使用当前仓库。
+两实验共享45940端口锁，必须串行执行；实验41仍运行时，本实验拒绝启动。完整源码与当前工作流都来自本仓库，不需要作者机器上的C/D盘副本。可用--backend-root选择另一份完整兼容工程，默认使用当前仓库。
 
-正式运行共170次；实验40另10次。上传不代表已经执行这180次。
+正式运行共170次；实验41另10次。上传不代表已经执行这180次。

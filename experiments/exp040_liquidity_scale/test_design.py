@@ -35,7 +35,7 @@ def test_tdr_scan_has_no_plain_runs_and_single_reference(config):
 
 
 def test_fig1_is_a_separate_off_only_experiment():
-    c=yaml.safe_load((HERE.parent/'exp040_motivation_tdr_off/config.yaml').read_text(encoding='utf-8'))
+    c=yaml.safe_load((HERE.parent/'exp041_fig1_plain_repeats/config.yaml').read_text(encoding='utf-8'))
     tasks=build_tasks(c)
     assert len(tasks)==10 and sum(t['transactions'] for t in tasks)==400000
     assert {t['policy'] for t in tasks}=={'plain'}
@@ -48,7 +48,7 @@ def test_fig1_is_a_separate_off_only_experiment():
 
 
 def test_common_master_design_and_exact_fixed_total_error_caps(config):
-    off=yaml.safe_load((HERE.parent/'exp040_motivation_tdr_off/config.yaml').read_text(encoding='utf-8'))
+    off=yaml.safe_load((HERE.parent/'exp041_fig1_plain_repeats/config.yaml').read_text(encoding='utf-8'))
     for key in ['master_transactions','pool_scan','group_cap_mult','shift_start_index','shift_period_transactions','shift_cycle_absolute']:
         assert off['exp'][key]==config['exp'][key]
     row=lambda block,route: dict(submit_block=block,route=route,ok=True)

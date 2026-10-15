@@ -1,5 +1,5 @@
 # Fixed service fee; broker retains 10%, independent of user principal.
-label: exp041_tdr_on_sensitivity
+label: exp040_liquidity_scale
 exp:
   rate: 120
   ctx_per_broker: 800

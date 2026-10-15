@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 
 HERE=Path(__file__).resolve().parent
-sys.path.insert(0,str(HERE.parent/'exp041_tdr_on_sensitivity'))
+sys.path.insert(0,str(HERE.parent/'exp040_liquidity_scale'))
 from run import main
 
 if __name__=='__main__':
