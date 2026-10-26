@@ -1,4 +1,4 @@
-# Fixed service fee; broker retains 10%, independent of user principal.
+# Exp041: TDR OFF ONLY. Same 200k master, fixed 40k prefix.
 label: exp041_fig1_plain_repeats
 exp:
   rate: 120
@@ -56,6 +56,7 @@ exp:
   reference_balance_eth: 45
   reference_transactions: 40000
   tdr_policy: topup
+  low_water_ratio: 0.3
   shift_start_index: 12000
   shift_period_transactions: 1600
   shift_cycle_absolute:

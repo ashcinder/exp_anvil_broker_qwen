@@ -9,7 +9,7 @@ from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
 
-REVISION = 'exp040-on-exp041-off-v4'
+REVISION = 'exp040-041-split-v2'
 ETH = 10**18
 
 
@@ -61,10 +61,12 @@ def validate_config(c):
         raise ValueError('Reference cell must occur in both grids')
     if int(e['repetitions']) != e['repetitions'] or e['repetitions'] <= 0 or e['route_seed_step'] <= 0:
         raise ValueError('Positive integer rounds and positive seed step required')
-    if e['tdr_policy'] != 'topup':
+    if e['tdr_policy'] not in ('topup', 'topup_lowwater'):
         raise ValueError('Unsupported policy')
     if not 0 <= e['tdr_epsilon'] <= 1 or not 0 <= e['tdr_q_min'] <= 1 or e['tdr_ewma_half_life'] <= 0:
         raise ValueError('Invalid TDR parameters')
+    if not 0 <= e['low_water_ratio'] <= 1:
+        raise ValueError('Invalid low-water ratio')
     if e['shift_start_index'] < 0 or e['shift_period_transactions'] <= 0:
         raise ValueError('Invalid absolute shift schedule')
     cycle = e['shift_cycle_absolute']

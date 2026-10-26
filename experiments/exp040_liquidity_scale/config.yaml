@@ -1,4 +1,4 @@
-# Fixed service fee; broker retains 10%, independent of user principal.
+# Exp040: TDR ON ONLY. Fixed service fee F, broker retains 10% F.
 label: exp040_liquidity_scale
 exp:
   rate: 120
@@ -72,6 +72,7 @@ exp:
   reference_balance_eth: 45
   reference_transactions: 40000
   tdr_policy: topup
+  low_water_ratio: 0.3
   shift_start_index: 12000
   shift_period_transactions: 1600
   shift_cycle_absolute:

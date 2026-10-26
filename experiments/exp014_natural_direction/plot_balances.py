@@ -27,6 +27,11 @@ if MAX_BLOCK <= 0 or not 0 <= EPSILON < 1:
     parser.error('max-block must be positive and epsilon must be in [0,1)')
 EPS_SCALE=int(EPSILON*1000000)
 BLUE,ORANGE,RED,GRAY='#28A8F2','#FFA537','#DE2B03','#888888'
+GREEN='#249B45'
+TDR_STYLE={
+    'out':('v',RED),
+    'in':('^',GREEN),
+}
 
 def main():
     OUT.mkdir(parents=True,exist_ok=True)
@@ -47,8 +52,8 @@ def main():
              Line2D([0],[0],color=GRAY,ls=':',lw=1.8,label='Lower bound'),
              Line2D([0],[0],color=BLUE,lw=3,label='Current balance'),
              Line2D([0],[0],color=ORANGE,lw=3.5,label='Target balance'),
-             Line2D([0],[0],color=RED,marker='o',ls='None',label='Confirmed TDR out'),
-             Line2D([0],[0],color=RED,marker='^',ls='None',label='Confirmed TDR in')]
+             Line2D([0],[0],color=TDR_STYLE['out'][1],marker=TDR_STYLE['out'][0],ls='None',label='Confirmed TDR out'),
+             Line2D([0],[0],color=TDR_STYLE['in'][1],marker=TDR_STYLE['in'][0],ls='None',label='Confirmed TDR in')]
     summary=[]
     for broker in range(50):
         folder=OUT/f'broker_{broker:02d}'
@@ -89,11 +94,11 @@ def main():
             ax.step(x,lower,where='post',color=GRAY,ls=':',lw=lw*.6,zorder=2)
             ax.step(x,beta,where='post',color=BLUE,lw=lw,zorder=4)
             ax.step(x,tau,where='post',color=ORANGE,lw=lw*1.15,zorder=3)
-            for kind,marker in (('out','o'),('in','^')):
+            for kind,(marker,color) in TDR_STYLE.items():
                 selected=[e for e in events[s] if e[2]==kind]
                 if selected:
                     ax.scatter([e[0] for e in selected],[e[1] for e in selected],s=points,
-                        color=RED,marker=marker,edgecolor='white',lw=.6,zorder=7)
+                        color=color,marker=marker,edgecolor='white',lw=.6,zorder=7)
             ax.set_xlim(0,MAX_BLOCK);ax.set_xticks(np.linspace(0,MAX_BLOCK,6,dtype=int))
             ax.grid(axis='y',linestyle=':',alpha=.45)
 

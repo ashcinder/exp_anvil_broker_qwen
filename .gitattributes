@@ -1,0 +1,4 @@
+* text=auto
+# Frozen runtime hashes require original bytes, including line endings.
+experiments/**/runtime/** -text whitespace=cr-at-eol
+*.gz -text

@@ -11,6 +11,8 @@
 """
 import argparse
 import csv
+import json
+import copy
 import statistics as st
 import sys
 from pathlib import Path
@@ -20,12 +22,12 @@ from brokerlab.plotting import COLOR_BROKER, COLOR_GRAY, save   # noqa: E402
 
 # 展示顺序 = 论文里的叙述顺序：先基线，再各 SOTA 臂，最后本方案。
 ORDER = ["plain", "pnps", "spider", "flexichain", "autoloop", "ucrb",
-         "overpass_u", "overpass_d", "loopmax", "topup"]
-LABEL = {"plain": "plain (no rebalancing)", "topup": "TDR (ours)",
-         "flexichain": "Flexichain (TOPS'24)", "loopmax": "Loopmax (ePrint'22)",
-         "spider": "Spider-vol (NSDI'20)", "pnps": "PnP-static (INFOCOM'20)",
-         "autoloop": "Autoloop (ePrint'22)", "overpass_u": "Overpass-QP θ=1/n",
-         "overpass_d": "Overpass-QP θ∝λ", "ucrb": "UCRB (ePrint'25)"}
+         "overpass_u", "overpass_d", "loopmax", "topup_e0", "topup"]
+LABEL = {"topup_e0": "TDR epsilon=0 (matched target)", "plain": "plain (no rebalancing)", "topup": "TDR (ours)",
+         "flexichain": "Flexichain-adapted", "loopmax": "Loopmax-adapted",
+         "spider": "Spider-rebalance-adapted", "pnps": "PnP-static (one-hop)",
+         "autoloop": "Autoloop-adapted", "overpass_u": "Overpass-QP θ=1/n",
+         "overpass_d": "Overpass-QP θ∝λ", "ucrb": "UCRB-adapted"}
 RAYS = (0.05, 0.10, 0.25, 0.50, 1.00)
 
 
@@ -38,25 +40,65 @@ def arm_of(row):
 
 
 def load(sources):
-    """可合并多次运行的 raw_results.csv：同一负载/种子/配置下分批跑出的臂
-    必须能画在同一张图上（每次运行自己起链，臂之间本来就相互独立）。"""
-    rows = []
+    rows, common = [], None
     for source in sources:
-        with (Path(source) / "raw_results.csv").open(encoding="utf-8") as stream:
+        root = Path(source)
+        manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+        report = json.loads((root / "report.json").read_text(encoding="utf-8"))
+        params = copy.deepcopy(json.loads((root / "params.json").read_text(encoding="utf-8")))
+        params["exp"].pop("arms", None)
+        params["chain"].pop("base_port", None)
+        key = (manifest.get("algorithm_revision"), manifest["source_files"],
+               manifest["workload_sha256"], manifest.get("training_sha256"), params)
+        if key[0] != "exp033-faithful-v2":
+            raise ValueError("Historical/unknown algorithm revision cannot be merged with repaired results")
+        if common is not None and common != key:
+            raise ValueError("Source, workload, training or common configuration mismatch")
+        common = key
+        tasks = {t["id"]: t for t in manifest["tasks"]}
+        with (root / "raw_results.csv").open(encoding="utf-8") as stream:
             for row in csv.DictReader(stream):
-                name = arm_of(row)
-                rows.append({"arm": name, "relay": int(row["relayed"]),
-                             "transfers": int(row["transfers"]),
-                             "moved_eth": float(row["moved_eth"]),
-                             "served": int(row["served"]), "n": int(row["n"]),
-                             "round": int(row["round"]), "source": str(source)})
+                task = tasks[row["task_id"]]
+                if (task["status"] != "complete" or int(row["route_seed"]) != task["route_seed"] or
+                    int(row["round"]) != task["round"] or row["value"] != str(task["value"])):
+                    raise ValueError("Uncompleted task or seed mismatch")
+                doc = json.loads((root / task["summary"]).read_text(encoding="utf-8"))
+                stats = doc["arms"][0]
+                if (doc["task_id"] != task["id"] or stats["arm"] != task["tag"] or
+                    doc["params"]["exp"]["route_seed"] != task["route_seed"] or
+                    doc["workload_sha256"] != manifest["workload_sha256"] or
+                    not doc["status"]["complete"] or not all(stats["gates"].values()) or
+                    not stats["burn_reconcile"]["ok"]):
+                    raise ValueError("Task failed workload/accounting gates")
+                if any(int(row[k]) != int(stats[k]) for k in ("n", "served", "relayed")):
+                    raise ValueError("CSV/verified task count mismatch")
+                if int(row["transfers"]) != stats["tdr"]["transfers_done"]:
+                    raise ValueError("CSV/task transfer mismatch")
+                rows.append(dict(arm=arm_of(row), relay=int(row["relayed"]),
+                                 transfers=int(row["transfers"]), moved_eth=float(row["moved_eth"]),
+                                 served=int(row["served"]), n=int(row["n"]), round=int(row["round"]),
+                                 seed=int(row["route_seed"]), source=str(source), token=task["token"],
+                                 formal=bool(manifest["formal"] and report["formal"] and report["status"]["complete"])))
     if not rows:
-        raise SystemExit("raw_results.csv 为空：先跑正式档")
-    # 同一 (臂, 场次) 出现两次 ⇒ 两次运行的种子/负载不同，合并会污染中位数。
+        raise ValueError("No completed results")
     keys = [(r["arm"], r["round"]) for r in rows]
-    duplicated = {k for k in keys if keys.count(k) > 1}
-    if duplicated:
-        raise SystemExit(f"重复的臂/场次（不可合并）：{sorted(duplicated)}")
+    if len(set(keys)) != len(keys):
+        raise ValueError("Duplicate arm/round")
+    baseline = {r["round"]: r for r in rows if r["arm"] == "plain"}
+    if not baseline:
+        raise ValueError("Missing paired plain baseline")
+    for arm in {r["arm"] for r in rows}:
+        group = [r for r in rows if r["arm"] == arm]
+        if {r["round"] for r in group} != set(baseline):
+            raise ValueError(f"Incomplete paired round coverage: {arm}")
+        if len({r["token"] for r in group}) != 1:
+            raise ValueError(f"Arm parameters changed between rounds: {arm}")
+        for r in group:
+            b = baseline[r["round"]]
+            if (r["seed"], r["n"]) != (b["seed"], b["n"]):
+                raise ValueError("Paired seed/workload size mismatch")
+            delta = b["relay"] - r["relay"]
+            r["rho"] = r["transfers"] / delta if delta > 0 else float("inf")
     return rows
 
 
@@ -73,7 +115,9 @@ def aggregate(rows):
             "transfers": st.median(r["transfers"] for r in group),
             "moved_eth": st.median(r["moved_eth"] for r in group),
             "served": st.median(r["served"] for r in group),
-            "rounds": len(group)}
+            "rounds": len(group),
+            "rho": st.median(r["rho"] for r in group),
+            "formal": all(r["formal"] for r in group) and len(group) >= 3 and all(r["n"] == 40000 for r in group)}
     return summary
 
 
@@ -97,19 +141,18 @@ def main():
     def rho_(arm):
         if arm == "plain":
             return None
-        dx = x0 - summary[arm]["relay"]
-        return summary[arm]["transfers"] / dx if dx > 0 else float("inf")
+        return summary[arm]["rho"]
 
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(8.4, 5.6), dpi=160)
-    x_lo = max(1.0, min(s["relay"] for s in summary.values()) * 0.5)
-    y_top = max(s["transfers"] for s in summary.values()) * 3.0
+    x_lo = max(0.25, min(max(s["relay"], .5) for s in summary.values()) * .5)
+    y_top = max(1., max(s["transfers"] for s in summary.values())) * 3.0
     # 盈亏平衡射线簇：y = (κ/μ)(x0 − x)，过 plain 点 (x0, 0)，线上方为亏损区。
     # 射线在【线性】坐标里是直线；x 轴取对数后按采样点画，形状自然弯曲。
-    for ratio in RAYS:
+    for ratio in (RAYS if x0 > 0 else ()):
         xs = [x0 - (x0 - x_lo) * i / 200 for i in range(201)]
         ys = [max(ratio * (x0 - x), 1e-9) for x in xs]
         keep = [i for i, y in enumerate(ys) if y <= y_top]
@@ -118,7 +161,7 @@ def main():
         ax.plot([xs[i] for i in keep], [ys[i] for i in keep], ls="--", lw=0.9,
                 color="0.62", zorder=1)
         # 标签放在射线左端稍内缩处，避免压到坐标轴外
-        head = next(i for i in keep if xs[i] >= x_lo * 1.25)
+        head = next((i for i in keep if xs[i] >= x_lo * 1.25), keep[0])
         ax.annotate(rf"$\kappa/\mu={ratio:g}$", (xs[head], ys[head]), fontsize=7.5,
                     color="0.45", ha="left", va="bottom")
     for index, arm in enumerate(ordered):
@@ -126,7 +169,8 @@ def main():
         color = (COLOR_BROKER if arm == "topup"
                  else COLOR_GRAY if arm == "plain" else "tab:blue")
         y = max(s["transfers"], 0.5)
-        ax.scatter(s["relay"], y, s=54, color=color, zorder=3,
+        display_x = max(s["relay"], .5)
+        ax.scatter(display_x, y, s=54, color=color, zorder=3,
                    marker="*" if arm == "topup" else "o",
                    edgecolor="black", linewidth=0.4)
         value = rho_(arm)
@@ -135,33 +179,36 @@ def main():
             tag += f"  $\\rho^*$={value:.3f}"
         # 右侧的点把标签甩到左边，左侧的点往右写；再按序交错上下偏移防压字
         left_of_point = s["relay"] > x0 * 0.55
-        ax.annotate(tag, (s["relay"], y), fontsize=7.5,
+        ax.annotate(tag, (display_x, y), fontsize=7.5,
                     ha="right" if left_of_point else "left",
                     xytext=(-8 if left_of_point else 6,
                             6 if index % 2 == 0 else -12),
                     textcoords="offset points")
-    ax.axvline(x0, color="0.75", lw=0.8, zorder=0)
-    ax.annotate("plain reference $x_0$", (x0, y_top), fontsize=7,
+    ax.axvline(max(x0, .5), color="0.75", lw=0.8, zorder=0)
+    ax.annotate("plain reference $x_0$", (max(x0, .5), y_top), fontsize=7,
                 color="0.45", ha="right", va="top")
     ax.set_xlabel("relay CTX (lower is better) →")
     ax.set_ylabel("rebalancing transfers (lower is better)")
-    ax.set_xlim(x_lo, x0 * 2.6)      # 右侧留白，右侧各点的标注才不出画框
+    ax.set_xlim(x_lo, max(2., max(s["relay"] for s in summary.values()) * 2.6))
     ax.set_ylim(0.4, y_top)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.grid(alpha=0.25, lw=0.5, which="both")
+    ax.text(.01, .01, "Zero counts displayed at 0.5 on log axes", transform=ax.transAxes, fontsize=7)
     sessions = summary["plain"]["rounds"]
-    suffix = "" if sessions >= 3 else f"  [analysis pass: {sessions} session]"
+    formal = set(ORDER) <= set(summary) and all(s["formal"] for s in summary.values())
+    suffix = "" if formal else "  [analysis / incomplete formal protocol]"
     ax.set_title("exp033 · SOTA rebalancing: relay vs transfers "
                  f"(median of {sessions} session{'s' if sessions > 1 else ''})"
                  f"{suffix}", fontsize=9)
     save(fig, figs / "exp033_pareto.png")
 
     lines = ["# exp033 · SOTA 对照汇总（中位数）", "",
-             f"负载与 exp025 同参数；场次 = {summary['plain']['rounds']}；"
+             f"正式协议完整：{formal}。", "",
+             f"新版独立训练/评估划分；场次 = {summary['plain']['rounds']}；"
              f"plain 参考点 relay = {x0}。", "",
              "| 方案 | relay CTX [区间] | 搬运次数 | 搬量 ETH | 服务 CTX | "
-             "ρ* = y/(x0−x) |", "|---|---:|---:|---:|---:|---:|"]
+             "ρ*（逐场配对后中位数） |", "|---|---:|---:|---:|---:|---:|"]
     for arm in ordered:
         s = summary[arm]
         value = rho_(arm)
@@ -170,7 +217,8 @@ def main():
         lines.append(f"| {LABEL.get(arm, arm)} | {s['relay']} "
                      f"[{s['relay_lo']}..{s['relay_hi']}] | {s['transfers']} | "
                      f"{s['moved_eth']:.0f} | {s['served']} | {cell} |")
-    lines += ["", "ρ* 越小 = 对经济环境越宽容 = 越稳健；ρ* 与任何 gas/费率假设无关。",
+    lines += ["", "ρ* 是逐场同种子 plain 的经济阈值比值中位数；无降低 relay 的场次记为 ∞。它不是实测利润。",
+              "正式标记要求全部臂通过同版源码、负载、训练集、参数和配对种子校验；旧结果不得合并。",
               "盈亏平衡射线 y=(κ/μ)(x0−x) 过 plain 点，线上方为亏损区。"]
     (figs.parent / "SUMMARY_CN.md").write_text("\n".join(lines) + "\n",
                                                encoding="utf-8")

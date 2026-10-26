@@ -41,6 +41,9 @@ class TdrDynamicEngine(DynamicBrokerEngine):
         self._tdr_moves: t.List[t.Tuple[int, int, int]] = []  # 已完成 (src,dst,amt) 台账
         self._tdr_move_events: t.List[t.Dict[str, int]] = []  # 带 burn/mint 块高的绘图台账
         self._balance_snapshots: t.List[t.Dict[str, t.Any]] = []
+        self._blocked_ctx = None
+        self._repair_wait = {}
+        self._repair_attempted = False
         self._await_ack: t.Set[str] = set()   # 未收到代铸回执的 mint 请求 ref
 
     def _report_liquidity_delta(self, shard: int, delta_wei: int) -> None:
@@ -59,15 +62,52 @@ class TdrDynamicEngine(DynamicBrokerEngine):
                              int(f.ctx["amount_wei"]),
                              src_shard=int(f.ctx["src_shard"]))
 
-    def _submit_relay(self, c: t.Dict[str, t.Any], now: float) -> None:
-        """终审改判 relay 是 ucrb 的唯一输入：把"这一笔为什么没服务成"的
-        缺口（金额 − 该分片可用额）如实回报给策略。其余策略忽略。"""
+    def _emit(self, row):
+        wait = self._repair_wait.pop(row["ctx_id"], 0.0)
+        row["repair_wait_secs"] = wait
+        if row.get("e2e_secs") is not None:
+            row["e2e_secs"] = float(row["e2e_secs"]) + wait
+        if self.tdr is not None and row["route"] == "broker" and row["ok"]:
+            self.tdr.record_success(int(row["amount_wei"]), int(row["submit_block"]),
+                                    int(row["dst"]), int(row["src"]))
+        super()._emit(row)
+
+    def _handle_shortfall(self, c, now):
+        if self.tdr is None or self.tdr.policy not in (TdrAgent.POLICY_UCRB, TdrAgent.POLICY_FLEXICHAIN):
+            return super()._handle_shortfall(c, now)
+        self._blocked_ctx = c
+        self._blocked_since = now
+        self._repair_attempted = False
+        if self._t_first == 0.0:
+            self._t_first = now
+        return True
+
+    def _pump(self):
+        if self._blocked_ctx is None:
+            return super()._pump()
+        c, now = self._blocked_ctx, self._clock()
+        dst, amount = int(c["dst_shard"]), int(c["amount_wei"])
+        # Wait for the existing burn/mint event before retrying THIS payment.
+        if self._tdr_items or self.tdr.state != TdrAgent.ST_IDLE:
+            return
+        if self._ledger.available(dst) >= amount:
+            self._repair_wait[c["ctx_id"]] = now - self._blocked_since
+            self._blocked_ctx = None
+            self._ledger.reserve(dst, amount)
+            self._submit_broker(c, now)
+            return
+        if not self._repair_attempted:
+            self._repair_attempted = True
+            snap = self._ledger.snapshot_available()
+            plans = self.tdr.start_rescue(self._h_est,
+                       [snap.get(s, 0) for s in range(self.tdr.num_shards)], dst, amount)
+            if plans:
+                self._execute_tdr_plan(plans)
+                return
+        # No feasible full repair, or the attempted repair failed.
+        self._repair_wait[c["ctx_id"]] = now - self._blocked_since
+        self._blocked_ctx = None
         super()._submit_relay(c, now)
-        if self.tdr is not None:
-            dst = int(c["dst_shard"])
-            gap = int(c["amount_wei"]) - max(0, self._ledger.available(dst))
-            if gap > 0:
-                self.tdr.notify_shortfall(dst, gap)
 
     # ------------------------------------------------------------------
     def tick_once(self) -> None:
@@ -121,6 +161,9 @@ class TdrDynamicEngine(DynamicBrokerEngine):
                                            range(len(snap))])
         if not plans:
             return
+        self._execute_tdr_plan(plans)
+
+    def _execute_tdr_plan(self, plans):
         self._tdr_seq += 1
         self._tdr_items = [{"src": s, "dst": d, "amount": a, "stage": "pending"}
                            for (s, d, a) in plans]
@@ -246,7 +289,7 @@ class TdrDynamicEngine(DynamicBrokerEngine):
         if self.tdr is None:
             return base
         return (base and self.tdr.state == TdrAgent.ST_IDLE
-                and not self._await_ack and not self._tdr_items)
+                and not self._await_ack and not self._tdr_items and self._blocked_ctx is None)
 
     def envelope(self) -> t.Dict[str, t.Any]:
         env = super().envelope()
@@ -293,6 +336,7 @@ def tdr_engine_from_payload(payload: t.Mapping[str, t.Any],
                      surplus_epsilon=float(tp.get("surplus_epsilon",
                                                    tp["epsilon"])),
                      topup_two_sided=bool(tp.get("topup_two_sided", False)),
+                     low_water_ratio=float(tp.get("low_water_ratio", 0.3)),
                      spider_vol_wei=int(tp.get("spider_vol_wei", 0)),
                      autoloop_low=float(tp.get("autoloop_low", 0.3)),
                      autoloop_high=float(tp.get("autoloop_high", 0.7)),
@@ -300,7 +344,11 @@ def tdr_engine_from_payload(payload: t.Mapping[str, t.Any],
                          tp.get("loopmax_horizon_blocks", 0.0)),
                      loopmax_safety_blocks=float(
                          tp.get("loopmax_safety_blocks", 3.0)),
-                     overpass_theta=str(tp.get("overpass_theta", "uniform")))
+                     overpass_theta=str(tp.get("overpass_theta", "uniform")),
+                     sota_capacity_wei=int(tp.get("sota_capacity_wei", 0)),
+                     sota_check_blocks=int(tp.get("sota_check_blocks", 10)),
+                     sota_conf_blocks=int(tp.get("sota_conf_blocks", 10)),
+                     qp_capacities=tp.get("qp_capacities"), qp_weights=tp.get("qp_weights"))
     return TdrDynamicEngine(
         tx, users,
         broker_idx=int(payload["broker_idx"]),

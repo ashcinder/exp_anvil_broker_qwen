@@ -19,7 +19,9 @@ HERE = Path(__file__).resolve().parent
 
 
 def backend_root(explicit=None):
-    candidates = [Path(explicit)] if explicit else [HERE.parents[1]]
+    candidates = [Path(explicit)] if explicit else [HERE.parents[1],
+        Path(r'D:/BaiduNetdiskDownload/exp_anvil_broker_qwen/exp_anvil_broker_qwen'),
+        HERE.parents[1]/'output/exp033_main_audit']
     for root in candidates:
         if (root/'experiments/exp025_regime_shift_sensitivity/pipeline.py').is_file():
             return root.resolve()

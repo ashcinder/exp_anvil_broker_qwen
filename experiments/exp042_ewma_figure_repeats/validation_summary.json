@@ -1,0 +1,32 @@
+{
+  "experiment": "C:\\Users\\hzy\\Downloads\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp042_ewma_figure_repeats",
+  "formal_plan": {
+    "rounds": 10,
+    "arms_per_round": 2,
+    "runs": 20,
+    "user_ctx_per_arm": 80000,
+    "total_user_ctx": 1600000
+  },
+  "checks": {
+    "dry_run": true,
+    "full_historical_workload_prepared": true,
+    "private_backend_anchors_compile_import": true,
+    "unit_and_software_integration_tests": 5,
+    "windows_spawn_counter": true,
+    "all_five_pdfs_exported_from_synthetic_fixture": true,
+    "real_anvil_smoke": false,
+    "formal_chain_run_started": false
+  },
+  "real_smoke_blocker": "Existing exp040 runner PID42020 owns shared lock45940. Lock was not bypassed; no existing process stopped.",
+  "prepared_run": "C:\\Users\\hzy\\Downloads\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp042_ewma_figure_repeats\\out\\20261016_160559",
+  "backend_source_was_not_patched": true,
+  "source_hashes": {
+    "accounting_logger.py": "303aeafbe6a03ad42e027a64fdda9aa2dbb553e093fb262894ac404bc72026e7",
+    "design.py": "b7ee9955ee52730c9875e45d1198009683afe97fe163e5747955c1bd3d6e2986",
+    "plot.py": "0be14b1e9338cc5ebab1b6cf56caf10849c50d28558645c25b689fef1adb552f",
+    "run.py": "2ddab1fcfeb20c292076fa2226d5bc9a73b007080901534dff40428730c0c47a",
+    "staging.py": "8cd5d756c31cb3f98c86aff2462fa24eadcef00e98ce065e80c04677e4c6b929",
+    "test_design.py": "6c3e1029fd68e0bc5593e93165e4adbe7ad412936bedc7ff1ce0d3c8b68d0746",
+    "test_pipeline.py": "d5cb70fc8d6cfc881e013ab208fd757a720a5a3c4ae73a5095578eb660a363b7"
+  }
+}

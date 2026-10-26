@@ -1,0 +1,47 @@
+{
+  "checked_at": "2026-10-24T08:43:24+08:00",
+  "unit_tests": 7,
+  "unit_tests_passed": true,
+  "smoke_run": "C:\\Users\\hzy\\Downloads\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp046_unified_100k_comparison\\out\\smoke_20261024_083356_078921",
+  "smoke_completed_methods": 5,
+  "smoke_all_integrity_and_accounting_gates_passed": true,
+  "smoke_plot_generator_sha256": "162d76410ab2395f35c2e964f33e3fc080568d30191a07cac60f5670971efd91",
+  "smoke_figures_visually_reviewed": true,
+  "first_extended_smoke": "200 CTX test hit its short drain deadline; correctly rejected, not formal data; final 40-CTX integration plan passed all five methods.",
+  "formal_run": "C:\\Users\\hzy\\Downloads\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp046_unified_100k_comparison\\out\\20261024_084301_944105",
+  "formal_launched": true,
+  "formal_completed": false,
+  "formal_plan": {
+    "protocol": "exp046-five-methods-100k-v1",
+    "smoke": false,
+    "methods": [
+      "autoloop",
+      "spider",
+      "prop_ewma",
+      "topup_e0",
+      "topup"
+    ],
+    "runs_per_method": 3,
+    "user_CTX_per_run": 100000,
+    "total_runs": 15,
+    "total_user_CTX": 1500000,
+    "brokers": 50,
+    "shards": 16,
+    "initial_ETH_per_subaccount": 45,
+    "route_seeds": [
+      7,
+      17,
+      27
+    ],
+    "fee_per_served_CTX_gwei": 0.0021,
+    "cost_per_rebalance_gwei": 0.021
+  },
+  "formal_workload_sha256": "a95760cd6c471dd3464d96ae8895fdad3d3e542542beecd5942a671777df08e1",
+  "formal_runner_pid": 48292,
+  "active_task": "r01_n100000_autoloop",
+  "formal_code_hashes": {
+    "design.py": "059bfb848dd74a65b4ab67fb504180345bb21ae1874d6bc9763549d678459189",
+    "plot.py": "162d76410ab2395f35c2e964f33e3fc080568d30191a07cac60f5670971efd91",
+    "run.py": "4e07b61211a45748d9df80310c72d0658d610c9f949b0e49b799bfa97a01228f"
+  }
+}

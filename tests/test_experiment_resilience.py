@@ -44,7 +44,7 @@ def test_exp003_coordinator_survives_old_one_second_block_deadline(monkeypatch):
 
     def sleep(seconds):
         sleeps.append(seconds)
-        clock.now = 5136.0  # End on the corrected deadline on the next iteration.
+        clock.now = 5136.0 if len(sleeps) == 1 else clock.now + 171.0
 
     monkeypatch.setattr(module.time, "monotonic", now)
     monkeypatch.setattr(module.time, "sleep", sleep)
@@ -64,8 +64,70 @@ def test_exp003_coordinator_survives_old_one_second_block_deadline(monkeypatch):
     result = done_queue.get_nowait()
     assert result["error"] is None
     assert result["aborted"].startswith("deadline")
-    assert sleeps == [.005]  # The coordinator continued past 2468s.
+    assert sleeps == [.005, .005]  # Continue past 2468s, then service the abort drain.
     assert ctx_queue.get_nowait() == module.END
+
+
+def test_exp003_budget_accounts_for_sender_concentration_and_window():
+    module = _load("exp003_sender_budget_test", "experiments/exp003_tdr_on_off/run.py")
+    hot = [dict(sender_idx=200, src_shard=3)] * 6
+    # Release all six in block 1; two-leg service needs three waves of two.
+    assert module._execution_budget_s(6, 120, 5, 0, ctxs=hot, sender_window=2) == 35
+    assert module._execution_budget_s(6, 120, 5, 0, ctxs=hot, sender_window=1) == 65
+    spread = [dict(sender_idx=200+i, src_shard=3) for i in range(6)]
+    assert module._execution_budget_s(6, 120, 5, 0, ctxs=spread, sender_window=2) == 15
+    separate_shards = [dict(sender_idx=200, src_shard=i) for i in range(6)]
+    assert module._execution_budget_s(6, 120, 5, 0, ctxs=separate_shards, sender_window=2) == 15
+
+
+def test_exp003_abort_drain_preserves_real_pending_mint_receipt(monkeypatch):
+    import queue
+
+    module = _load("exp003_drain_test", "experiments/exp003_tdr_on_off/run.py")
+    clock = SimpleNamespace(now=0.0, reads=0)
+    rep, req, ack, close, done = (queue.Queue() for _ in range(5))
+    req.put(dict(ref="T1.0", engine=0, receiver_idx=100, amount_wei=1, dst_shard=0))
+
+    def now():
+        clock.reads += 1
+        if clock.reads > 2 and clock.now == 0:
+            clock.now = 2.0
+        return clock.now
+
+    def sleep(_):
+        clock.now += 1
+        if not ack.empty():
+            rep.put(("engine_closed", 0))
+            close.put(0)
+
+    tx = SimpleNamespace(
+        block_number=lambda _: 0, send_transfer=lambda *_: "mint_hash",
+        probe_receipt=lambda *_: (dict(status=1, block=1) if clock.now >= 3 else None))
+    monkeypatch.setattr(module.time, "monotonic", now)
+    monkeypatch.setattr(module.time, "sleep", sleep)
+    monkeypatch.setattr(module, "build_services", lambda _: (
+        tx, SimpleNamespace(address=lambda _: "broker"),
+        SimpleNamespace(num_brokers=1, coordinator_index=1)))
+    params = dict(num_shards=1, num_brokers=1, balances_eth=45, route_seed=7,
+                  release_poll_s=.15, max_backlog=80000, dispatch_per_tick=200,
+                  loop_sleep_s=.005, execution_budget_s=1, shutdown_grace_s=5,
+                  probe_first_s=0, probe_s=.2, relay_timeout_s=120)
+    module._routing_coordinator_worker(
+        {}, params, 120, 2, [], [queue.Queue()], rep, req, [ack], close,
+        queue.Queue(), done, SimpleNamespace(wait=lambda: None))
+    result = done.get_nowait()
+    assert result["error"] is None
+    assert result["aborted"].startswith("deadline")
+    assert result["closes"] == 1
+    assert ack.get_nowait() == ("T1.0", 1, 1)  # Real success, not fabricated rejection.
+
+
+def test_exp003_retains_individual_engine_results(tmp_path):
+    module = _load("exp003_partial_result_test", "experiments/exp003_tdr_on_off/run.py")
+    env = dict(broker_idx=4, rows=[dict(ctx_id="c1", ok=True)],
+               tdr=dict(balance_snapshots=[dict(block=20, shard_0_balance=45)]))
+    module._save_engine_result(tmp_path, env)
+    assert json.loads((tmp_path / "engine_results/broker_04.json").read_text()) == env
 
 
 @pytest.fixture(params=[

@@ -1,9 +1,4 @@
-# exp033 · SOTA 再平衡方案对照（Pareto：relay × 搬运次数）
-#
-# 与 exp025 逐参数相同（同 40000 CTX、同 16 分片 × 50 broker、同 route_seed
-# 序列 7/17/27、同 regime-shift 负载、同资金 45 ETH），只换 exp.arms：
-# 保证每个 SOTA 点与已发表的 plain/TDR 点落在同一条负载上，可直接比。
-# 臂的决策规则见 brokerlab/sota_policies.py；设计依据见 SOTA_COMPARISON_DESIGN.md。
+# Revision exp033-faithful-v2. See README.md and ALGORITHMS_CN.md.
 label: exp033_sota_comparison
 exp:
   rate: 120
@@ -49,29 +44,26 @@ exp:
   tdr_base_lead_blocks: 6.0
   tdr_base_safety: 2.0
   tdr_base_floor_frac: 0.05
-  # 所有臂共用同一需求估计器：EWMA hl=20（= TDR 定稿臂的估计器），
-  # loopmax 的 Â_net / overpass 与 pnps 的 λ 都取它，避免"估计器不同"混淆归因。
   tdr_ewma_half_life: 20.0
-  arms: >-
-    plain@45,topup@45@@0.95@@20@0.3,flexichain@45,loopmax@45@@0.0@@20@0.0,spider@45,pnps@45,autoloop@45,overpass_u@45@@0.0,overpass_d@45@@0.0,ucrb@45
+  arms: plain@45,topup@45@@0.95@@20@0.3,flexichain@45,loopmax@45@@0.0@@20@0.0,spider@45,pnps@45,autoloop@45,overpass_u@45@@0.0,overpass_d@45@@0.0,ucrb@45,topup_e0@45@@0.0@@20@0.3
   tdr_ewma_min_blocks: 5
   tdr_ewma_window_blocks: 0
   tdr_ewma_two_sided: false
-  # —— SOTA 对照臂旋钮（只在对应 policy 下被读取）——
-  # spider：流水触发阈值 = 倍数 × 该 broker 总资本 (n×C)。
-  # 文献原值"每 10,000e 均衡一次"的绝对单位与本平台不可比，按资本比例换算。
   sota_spider_vol_mult: 0.25
-  # autoloop：余额穿 [0.3C, 0.7C] 才动，目标 = band 中点 0.5C（文献默认值）。
   sota_autoloop_low: 0.3
   sota_autoloop_high: 0.7
-  # loopmax：horizon = 0 ⇒ 用 window+chi 块（= T_check + T_conf 的等价物）；
-  # 安全边际 = 3 块（文献 2 分钟流量 / 20 分钟 horizon ≈ 0.1×30 块）。
-  sota_loopmax_horizon_blocks: 0.0
-  sota_loopmax_safety_blocks: 3.0
+  sota_loopmax_horizon_blocks: 20.0
+  sota_loopmax_safety_blocks: 2.0
   match_ctrl_bytes: 100
   repetitions: 3
   route_seed_step: 10
-  plotting_script: experiments/exp033_sota_comparison/plot_pareto.py
+  plotting_script: experiments/exp033_sota_comparison/plot_teacher_pareto.py
+  sota_training_ctx: 12000
+  sota_pnps_epoch_blocks: 10
+  sota_pnps_outage: 0.05
+  sota_capacity_mult: 2.0
+  sota_check_blocks: 10
+  sota_conf_blocks: 10
 chain:
   anvil_bin: null
   mnemonic: myth like bonus scare over problem client lizard pioneer submit female

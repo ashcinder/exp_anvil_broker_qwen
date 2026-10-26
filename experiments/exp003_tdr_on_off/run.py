@@ -53,10 +53,37 @@ def exp_param(cfg, key, kind=int):
     return kind(cfg.exp[key])
 
 
-def _execution_budget_s(total_ctx, rate_per_block, block_time_s, drain_tail_s):
-    """Convert the block-based release schedule into a wall-clock budget."""
+def _execution_budget_s(total_ctx, rate_per_block, block_time_s, drain_tail_s,
+                        *, ctxs=None, sender_window=2):
+    """Budget both block release and sender-window two-leg service queues.
+
+    This is a planning estimate, not a measured completion time. Extra RPC,
+    broker/TDR congestion and mining delays still consume drain_tail_s.
+    """
     release_blocks = (total_ctx + rate_per_block - 1) // rate_per_block
-    return release_blocks * block_time_s + drain_tail_s
+    completion_block = release_blocks
+    if ctxs is not None:
+        if sender_window < 1:
+            raise ValueError("sender_window must be positive")
+        slots = {}
+        for pos, ctx in enumerate(ctxs):
+            key = group_key(ctx)
+            queue_ = slots.setdefault(key, deque())
+            start = (pos + rate_per_block) // rate_per_block
+            if len(queue_) == sender_window:
+                start = max(start, queue_.popleft())
+            finish = start + 2  # Theta1 confirmation, then Theta2 confirmation.
+            queue_.append(finish)
+            completion_block = max(completion_block, finish)
+    return completion_block * block_time_s + drain_tail_s
+
+
+def _save_engine_result(arm_dir, env):
+    """Retain received results even if a different broker later fails to close."""
+    folder = arm_dir / "engine_results"
+    folder.mkdir(exist_ok=True)
+    (folder / f"broker_{int(env['broker_idx']):02d}.json").write_text(
+        json.dumps(env), encoding="utf-8")
 
 
 def dist(vals):
@@ -195,6 +222,8 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
         pending_mint = {}
         now = time.monotonic
         aborted = None
+        abort_deadline = None
+        last_diagnostic = -float("inf")
         end_sent = False
         closes: set = set()
         rep_closes: set = set()       # 与 liquidity/CTX 共队列，提供严格 FIFO 收口屏障
@@ -310,7 +339,7 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
                 # TDR 的本地 reserved，在途期间反而造成过度分派。
             else:
                 rel_target = last_rel
-            while release_pos < rel_target:
+            while not end_sent and release_pos < rel_target:
                 c = ctxs[release_pos]
                 key = (c["sender_idx"], c["src_shard"])
                 pend.setdefault(key, deque()).append(c)
@@ -322,8 +351,8 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
                 for q in ctx_qs:
                     q.put_nowait(END)
                 break
-            ready = sorted((pend[k][0]["arrival_pos"], k)
-                           for k in pend if infl_sent.get(k, 0) < window)
+            ready = ([] if end_sent else sorted((pend[k][0]["arrival_pos"], k)
+                           for k in pend if infl_sent.get(k, 0) < window))
             disp_before = disp
             for _, key in ready[:int(params["dispatch_per_tick"])]:
                 dq = pend.get(key)
@@ -360,14 +389,42 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
                 for q in ctx_qs:
                     q.put_nowait(END)        # 引擎停止开新事件；coordinator 继续服务在途
                 end_sent = True
-            if now() - t0 > params["execution_budget_s"]:
+            elapsed = now() - t0
+            if params.get("diagnostic_path") and (
+                    elapsed - last_diagnostic >= 30 or
+                    (aborted is None and elapsed > params["execution_budget_s"])):
+                groups = sorted(set(pend) | {key for _, key in assigned.values()})
+                diagnostic = {
+                    "complete": False, "elapsed_s": elapsed,
+                    "execution_budget_s": params["execution_budget_s"],
+                    "block": h_cache, "release_start_block": h0,
+                    "released": release_pos, "total_ctx": N,
+                    "dispatched": disp, "settled": done,
+                    "undispatched": N - disp, "inflight": len(assigned),
+                    "pending_mints": len(pending_mint),
+                    "end_sent": end_sent, "aborted": aborted,
+                    "sender_groups": [
+                        {"sender_idx": key[0], "src_shard": key[1],
+                         "queued": len(pend.get(key, ())),
+                         "inflight": infl_sent.get(key, 0),
+                         "assigned": [{"ctx_id": cid, "broker_idx": b}
+                                      for cid, (b, k) in assigned.items() if k == key]}
+                        for key in groups],
+                }
+                Path(params["diagnostic_path"]).write_text(
+                    json.dumps(diagnostic), encoding="utf-8")
+                last_diagnostic = elapsed
+            if aborted is None and elapsed > params["execution_budget_s"]:
                 aborted = f"deadline（派发 {disp}/{N}，落定 {done}/{N}，收口 {len(closes)}）"
                 if not end_sent:
                     for q in ctx_qs:
                         q.put_nowait(END)
                     end_sent = True
-                # 清账退出：给每一个未完成请求显式回执 status=0，
-                # 让引擎把 in-flight 段判终态——coordinator 绝不带着未答请求离开。
+                # END stops new work, but outstanding burn/mint legs still need
+                # real receipt service. Do not reject already submitted mints.
+                abort_deadline = now() + params.get("shutdown_grace_s", 170.0)
+            if abort_deadline is not None and now() > abort_deadline:
+                # The bounded drain failed. Report incomplete, never success.
                 for _ in range(100000):
                     try:
                         rq = req_q.get_nowait()
@@ -376,20 +433,13 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
                     ack_qs[rq["engine"]].put((rq["ref"], 0, None))
                 for h, pnd in list(pending_mint.items()):
                     ack_qs[pnd[1]].put((pnd[0], 0, None))
-                deadline_ = now() + 15.0
-                while len(closes) < params["num_brokers"] and now() < deadline_:
-                    time.sleep(0.1)
-                    try:
-                        while True:
-                            closes.add(close_q.get_nowait())
-                    except queue.Empty:
-                        pass
                 aborted += f"，清账后收口 {len(closes)}"
                 break
             time.sleep(params.get("loop_sleep_s", 0.02))
         injection_wall_s = ((last_dispatch_mono - t0)
                             if last_dispatch_mono is not None else None)
         doneq.put({"dispatched": disp, "settled": done, "served": served_ct,
+                   "released": release_pos, "execution_budget_s": params["execution_budget_s"],
                    "relay_settled": relay_ct, "no_qualified_est": nq_est,
                    "no_qualified_local": nq_local, "backlog_peak": int(backlog_peak),
                    "injection_wall_s": (round(injection_wall_s, 3)
@@ -503,7 +553,23 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                        "release_poll_s": exp_param(cfg, "release_poll_s", float),
                        "drain_tail_s": exp_param(cfg, "drain_tail_s", float)})
         params["execution_budget_s"] = _execution_budget_s(
-            N, rate, cfg.chain.block_time_s, params["drain_tail_s"])
+            N, rate, cfg.chain.block_time_s, params["drain_tail_s"],
+            ctxs=sel, sender_window=exp_param(cfg, "sender_window", int))
+        params["shutdown_grace_s"] = max(
+            params["engine_timeout_s"], params["relay_timeout_s"],
+            exp_param(cfg, "tdr_timeout_blocks", int) * cfg.chain.block_time_s
+        ) + 2 * cfg.chain.block_time_s + 10
+        params["diagnostic_path"] = str(arm_dir / "coordinator_progress.json")
+        (arm_dir / "execution_budget.json").write_text(json.dumps({
+            "rate_per_block": rate, "block_time_s": cfg.chain.block_time_s,
+            "sender_window": exp_param(cfg, "sender_window", int),
+            "drain_tail_s": params["drain_tail_s"],
+            "execution_budget_s": params["execution_budget_s"],
+            "shutdown_grace_s": params["shutdown_grace_s"],
+            "basis": "arrival schedule plus sender-window two-leg queue estimate; not measured duration",
+        }), encoding="utf-8")
+        print(f"  时间预算={params['execution_budget_s']:.0f}s（含发送者排队和收尾）；"
+              f"异常收口宽限={params['shutdown_grace_s']:.0f}s", flush=True)
         tdr_params = None
         if engine != "plain":
             pol = {"proportional": "proportional", "valve": "valve",
@@ -599,7 +665,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
         gate.set()
         t0 = time.monotonic()
         envs = {}
-        deadline = t0 + params["execution_budget_s"] + 120
+        deadline = t0 + params["execution_budget_s"] + params["shutdown_grace_s"] + 120
         while len(envs) < nb:
             if watchdog.tripped:
                 raise RuntimeError("RSS watchdog tripped")
@@ -611,8 +677,9 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
             try:
                 env = outq.get(timeout=1.0)
                 envs[env["broker_idx"]] = env
+                _save_engine_result(arm_dir, env)
                 continue
-            except Exception:
+            except queue.Empty:
                 pass
             if not coord.is_alive():
                 # coordinator 已退：先掏空 outq（其 feeder 已 flush），仍凑不齐才异常
@@ -620,7 +687,8 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                     while True:
                         env = outq.get_nowait()
                         envs[env["broker_idx"]] = env
-                except Exception:
+                        _save_engine_result(arm_dir, env)
+                except queue.Empty:
                     pass
                 if len(envs) < nb:
                     errs = [e.get("error") for e in envs.values() if e.get("error")]
@@ -628,6 +696,8 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                         print("  -- engine error --\n", er)
                     try:
                         cd = doneq.get_nowait()
+                        (arm_dir / "coordinator.json").write_text(
+                            json.dumps(cd), encoding="utf-8")
                         print("  -- coordinator 终态 --", {k: cd.get(k) for k in
                               ("dispatched", "settled", "aborted", "error")})
                     except Exception:
@@ -635,6 +705,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                     raise RuntimeError(f"{arm}: coordinator 死亡时仍有 "
                                        f"{nb - len(envs)} 个引擎未落定")
         coord_env = doneq.get(timeout=120)
+        (arm_dir / "coordinator.json").write_text(json.dumps(coord_env), encoding="utf-8")
         coord.join(timeout=30)
         for p in procs:
             p.join(timeout=10)
@@ -800,6 +871,15 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
             stats["block_capacity"] = collect_blocks(Connections(cfg.chain), rows, arm_dir, len(shards))
         (arm_dir / "coordinator.json").write_text(json.dumps(coord_env))
         return stats
+    except BaseException as exc:
+        received = locals().get("envs", {})
+        (arm_dir / "failure.json").write_text(json.dumps({
+            "complete": False, "type": type(exc).__name__, "message": str(exc),
+            "received_brokers": sorted(received),
+            "missing_brokers": sorted(set(range(cfg.scale.num_brokers)) - set(received)),
+            "partial_results": "engine_results/ (received engines only; not a passed experiment)",
+        }), encoding="utf-8")
+        raise
     finally:
         for p in procs:
             if p.is_alive():

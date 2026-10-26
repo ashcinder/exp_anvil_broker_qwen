@@ -556,10 +556,15 @@ class DynamicBrokerEngine(BrokerEngine):
                         "all_conf": {str(s): self._ledger.confirmed.get(s, 0)
                                      for s in self._ledger.confirmed},
                     })
-                self._submit_relay(c, now)      # 终审改判：不占本地预留
+                if self._handle_shortfall(c, now):
+                    return
                 continue
             self._ledger.reserve(dst, v)
             self._submit_broker(c, now)
+
+    def _handle_shortfall(self, c, now):
+        self._submit_relay(c, now)
+        return False
 
     def _emit(self, row: t.Dict[str, t.Any]) -> None:
         super()._emit(row)

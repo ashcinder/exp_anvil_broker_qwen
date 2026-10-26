@@ -213,7 +213,11 @@ def apply_regime_shift(sel, cfg):
 
 
 def build_workload(cfg, out_root):
-    n = cfg.scale.num_brokers * exp_param(cfg, "ctx_per_broker", int)
+    eval_n = cfg.scale.num_brokers * exp_param(cfg, "ctx_per_broker", int)
+    training_n = int(cfg.exp.get("sota_training_ctx", 0))
+    if training_n < 0:
+        raise ValueError("negative training size")
+    n = eval_n + training_n
     scan = exp_param(cfg, "pool_scan", int)
     scan_max = int(cfg.exp.get("pool_scan_max", scan))
     if scan <= 0 or scan_max < scan:
@@ -277,6 +281,25 @@ def build_workload(cfg, out_root):
     if added_groups:
         print(f"  workload selection: admitted {len(added_groups)} additional sender groups "
               f"to obtain {n} distinct CTX", flush=True)
+    if training_n:
+        training_positions = set(random.Random(int(cfg.exp["seed"]) + 3301).sample(range(n), training_n))
+        training, sel = ([r for i, r in enumerate(sel) if i in training_positions],
+                         [r for i, r in enumerate(sel) if i not in training_positions])
+        if {r["ctx_id"] for r in training} & {r["ctx_id"] for r in sel}:
+            raise ValueError("training/evaluation leakage")
+        (Path(out_root)/"training.json").write_text(json.dumps(training), encoding="utf-8")
+        # Shared offline estimate: each broker gets 1/nb of aggregate demand.
+        # Whole windows only; no evaluation transactions enter the planner.
+        size = int(cfg.exp["rate"] * cfg.exp.get("sota_pnps_epoch_blocks", 10))
+        if size <= 0 or len(training) < 2 * size:
+            raise ValueError("PnP needs at least two complete training epoch windows")
+        samples = []
+        for pos in range(0, len(training)-size+1, size):
+            amounts = [0] * cfg.chain.num_shards
+            for row in training[pos:pos+size]:
+                amounts[int(row["dst_shard"])] += int(row["amount_wei"])
+            samples.append([(v + cfg.scale.num_brokers-1)//cfg.scale.num_brokers for v in amounts])
+        cfg.exp["sota_training_samples"] = samples
     sel = apply_regime_shift(sel, cfg)
     if cfg.exp.get("shift_avoid_same_shard", False) and any(c["src_shard"] == c["dst_shard"] for c in sel):
         raise ValueError("Regime-shift workload contains a same-shard transaction")
@@ -291,7 +314,7 @@ def build_workload(cfg, out_root):
 # 起链与充值（同 exp007；两方案各自全新链）
 # ---------------------------------------------------------------------------
 
-def fund_chain(cfg, sel, total_wei, arm_dir, watchdog, fund_eth=None):
+def fund_chain(cfg, sel, total_wei, arm_dir, watchdog, fund_eth=None, initial_balances=None):
     nb = cfg.scale.num_brokers
     shards = list(range(cfg.chain.num_shards))
     arm_dir.mkdir(parents=True, exist_ok=True)
@@ -320,7 +343,7 @@ def fund_chain(cfg, sel, total_wei, arm_dir, watchdog, fund_eth=None):
         coord_addr = users.address(cfg.scale.coordinator_index)
         for s in shards:
             for a in broker_addrs:
-                tx.set_balance_setup(a, s, init_wei)
+                tx.set_balance_setup(a, s, init_wei if initial_balances is None else initial_balances[s])
             tx.set_balance_setup(
                 coord_addr, s,
                 int(total_wei * exp_param(cfg, "coord_budget_mult", float)) + 10 * ETH)
@@ -351,7 +374,7 @@ def _routing_coordinator_worker(cfg_plain, params, rate, window, ctxs,
         shards = list(range(params["num_shards"]))
         N = len(ctxs)
         init_wei = int(params["balances_eth"] * ETH)
-        est = {b: {s: init_wei for s in shards} for b in range(nb)}
+        est = {b: {s: params.get("initial_balances", [init_wei]*len(shards))[s] for s in shards} for b in range(nb)}
         nonces = NonceManager()
         rng = random.Random(int(params["route_seed"]))
         pend, infl_sent, assigned = {}, {}, {}
@@ -721,9 +744,18 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
     N = len(sel)
     arm_dir = out_root / arm
     fund_eth = exp_param(cfg, "balances_eth", float) if fund_eth is None else fund_eth
+    initial_balances = [int(fund_eth * ETH)] * len(shards)
+    initialization = None
+    if engine == "pnps":
+        from brokerlab.sota_native import pnps_plan
+        initialization = pnps_plan(cfg.exp.get("sota_training_samples", []),
+                                   sum(initial_balances), float(cfg.exp.get("sota_pnps_outage", .05)))
+        initial_balances = initialization["target"]
+        arm_dir.mkdir(parents=True, exist_ok=True)
+        (arm_dir / "initialization.json").write_text(json.dumps(initialization, indent=2), encoding="utf-8")
     cluster, tx, users, broker_addrs, before = fund_chain(cfg, sel, total_wei,
                                                           arm_dir, watchdog,
-                                                          fund_eth=fund_eth)
+                                                          fund_eth=fund_eth, initial_balances=initial_balances)
     ctxm = mp.get_context("spawn")
     procs, coord = [], None
     try:
@@ -734,6 +766,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
         params.update({"fee_broker_wei": _fb, "fee_burn_wei": _fbrn,
                        "num_shards": cfg.chain.num_shards,
                        "balances_eth": fund_eth,
+                       "initial_balances": initial_balances,
                        "route_seed": exp_param(cfg, "route_seed", int),
                        # 估计表全量刷新的节奏与并行度。exp007 在 2 分片下是每块刷
                        # （100 次读 ≈ 0.3-0.75 s）；本平台 16 分片 = 800 次读，
@@ -775,11 +808,12 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                 "demand_ewma_min_blocks": int(cfg.exp.get("tdr_ewma_min_blocks", 5)),
                 "demand_ewma_window_blocks": int(cfg.exp.get("tdr_ewma_window_blocks", 0)),
                 "topup_two_sided": bool(cfg.exp.get("tdr_ewma_two_sided", False)),
+                "low_water_ratio": float(cfg.exp.get("low_water_ratio", 0.3)),
                 # —— SOTA 对照臂旋钮（缺键取默认值；非对应策略时不读取）——
                 # spider：流水触发阈值 = 该倍数 × broker 总资本 n×C。
                 # 文献原值是"每 10,000e 均衡一次"，绝对单位与本平台不可比，
                 # 故换算成相对自身资本的比例（见 exp033/README.md §标定）。
-                "spider_vol_wei": int(exp_param(cfg, "balances_eth", float)
+                "spider_vol_wei": int(fund_eth
                                       * ETH * cfg.chain.num_shards
                                       * float(cfg.exp.get("sota_spider_vol_mult",
                                                           0.25))),
@@ -790,6 +824,15 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
                 "loopmax_safety_blocks": float(
                     cfg.exp.get("sota_loopmax_safety_blocks", 3.0)),
             }
+            if engine in ("flexichain", "loopmax", "spider", "pnps", "autoloop", "overpass_u", "overpass_d", "ucrb"):
+                # SOTA scheduling is independent of TDR chi and cold-start offset.
+                tdr_params["chi_blocks"] = 0
+                tdr_params.update(sota_capacity_wei=int(fund_eth * ETH * float(cfg.exp.get("sota_capacity_mult", 2.0))),
+                                  sota_check_blocks=int(cfg.exp.get("sota_check_blocks", 10)),
+                                  sota_conf_blocks=int(cfg.exp.get("sota_conf_blocks", 10)),
+                                  qp_capacities=cfg.exp.get("sota_qp_capacities",
+                                      [int(fund_eth * ETH) * len(shards)] * len(shards)),
+                                  qp_weights=cfg.exp.get("sota_qp_weights"))
             tdr_params.update(extra_pol)
         cfg_plain = {"chain": asdict(cfg.chain), "scale": asdict(cfg.scale)}
         init_wei = int(fund_eth * ETH)
@@ -824,11 +867,11 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
             if equipped is not None and b not in equipped:
                 my_tdr = None                 # 未装备 ⇒ plain 动态引擎
             payload = {"cfg": cfg_plain, "broker_idx": b,
-                       "init_wei_by_shard": {s: init_wei for s in shards},
+                       "init_wei_by_shard": {s: initial_balances[s] for s in shards},
                        "params": params, "tdr_params": my_tdr,
                        "relay_probe": relay_probe}
             if my_tdr:                        # 冷启动错峰：按 broker 索引偏移
-                payload["tdr_params"] = dict(my_tdr, offset_blocks=b % 5)
+                payload["tdr_params"] = dict(my_tdr, offset_blocks=(b % 5 if engine in ("proportional", "topup", "base", "valve", "topup_qfloor", "topup_lowwater") else 0))
             p = ctxm.Process(target=_engine_worker,
                              args=(payload, ctx_qs[b], rep_q, req_q, ack_qs[b],
                                    close_q, readyq, outq, gate))
@@ -895,7 +938,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
         served = [r for r in rows if r["ok"] and r["route"] == "broker"]
         relay = [r for r in rows if r["ok"] and r["route"] == "relay"]
         failed = [r for r in rows if not r["ok"]]
-        per = {b: dict.fromkeys(shards, init_wei) for b in range(nb)}
+        per = {b: {s: initial_balances[s] for s in shards} for b in range(nb)}
         for r in rows:
             if r["ok"] and r["route"] == "broker":
                 # B2E：Θ1a 到账 v+F、Θ1b 随即烧 (1−β)F ⇒ src 净进账 v+βF
@@ -951,6 +994,7 @@ def run_arm(cfg, arm, sel, total_wei, out_root, watchdog,
         tdr_legs = 2 * tdr_snap["transfers_done"] + tdr_snap["transfers_lost"]
         stats = {
             "arm": arm, "engine": engine, "fund_eth": round(fund_eth, 2),
+            "initialization": initialization,
             "rate": rate, "n": len(rows),
             "served": len(served), "relayed": len(relay), "failed": len(failed),
             "wall_s": round(wall, 2), "t_ready_s": round(t_ready, 2),
@@ -1051,7 +1095,10 @@ def make_figure(out_root, results):
 # arm 名 → 引擎键。SOTA 对照臂（exp033）的决策规则在 sota_policies.py，
 # 它们的名字直接就是引擎键；policy 名与附加参数的映射见 _POLICY_TABLE。
 _ARM_ENGINE = {"plain": "plain", "tdr": "proportional", "valve": "valve",
-               "base": "base", "topup": "topup",
+               "base": "base", "topup": "topup", "topup_e0": "topup",
+               "topup_qfloor": "topup_qfloor", "topup_lowwater": "topup_lowwater",
+               **{f"qfloor_q{v}": "topup_qfloor" for v in (0, 10, 20, 30, 50, 80, 100)},
+               **{f"qfloor_e{v}": "topup_qfloor" for v in (0, 50, 80, 95)},
                "flexichain": "flexichain", "loopmax": "loopmax",
                "spider": "spider", "pnps": "pnps", "autoloop": "autoloop",
                "overpass_u": "overpass_u", "overpass_d": "overpass_d",
@@ -1063,6 +1110,8 @@ _POLICY_TABLE = {
     "valve": ("valve", {}),
     "base": ("base", {}),
     "topup": ("topup", {}),
+    "topup_qfloor": ("topup_qfloor", {}),
+    "topup_lowwater": ("topup_lowwater", {}),
     "flexichain": ("flexichain", {}),
     "loopmax": ("loopmax", {}),
     "spider": ("spider_vol", {}),
@@ -1082,7 +1131,9 @@ def _arm_spec(token):
       hl EWMA 半衰期；qmin 覆盖 τ 地板比例。fund=None ⇒ 用 cfg 的 balances_eth。"""
     parts = token.split("@")
     name = parts[0]
-    engine = _ARM_ENGINE.get(name, "plain")
+    if name not in _ARM_ENGINE:
+        raise ValueError(f"Unknown arm {name!r}")
+    engine = _ARM_ENGINE[name]
     fund = float(parts[1]) if len(parts) > 1 and parts[1] else None
     cap = float(parts[2]) if len(parts) > 2 and parts[2] else None
     eps = float(parts[3]) if len(parts) > 3 and parts[3] else None

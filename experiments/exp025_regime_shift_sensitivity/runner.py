@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import socket
 import subprocess
 import sys
@@ -35,6 +36,8 @@ def digest(value):
 def source_fingerprint():
     files = [Path(__file__), Path(pipeline.__file__), Path(__file__).with_name("paper_data.py")]
     files += sorted((ROOT / "brokerlab").glob("*.py"))
+    files += sorted((ROOT / "experiments/exp033_sota_comparison").glob("*.py"))
+    files += sorted((ROOT / "experiments/exp034_qmin_floor").glob("*.py"))
     return {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
 
 
@@ -52,8 +55,11 @@ def token_tag(token):
 def tasks_for(cfg, kind, space=None):
     tasks = []
     rounds = int(cfg.exp["repetitions"])
-    if kind == "exp025":
-        if not space or set(space) - {"q_min", "half_life", "epsilon"}:
+    if rounds <= 0:
+        raise ValueError("repetitions must be positive")
+    if kind in ("exp025", "exp034"):
+        if not space or set(space) - ({"q_min", "half_life", "epsilon", "low_water_ratio"}
+                                      if kind == "exp034" else {"q_min", "half_life", "epsilon"}):
             raise ValueError("Sensitivity space must contain supported dimensions")
         for parameter, spec in space.items():
             values = spec["values"]
@@ -62,24 +68,36 @@ def tasks_for(cfg, kind, space=None):
     for rep in range(1, rounds + 1):
         seed = int(cfg.exp["route_seed"]) + (rep - 1) * int(cfg.exp["route_seed_step"])
         settings = []
-        if kind == "exp025":
+        if kind in ("exp025", "exp034"):
             for parameter, spec in space.items():
                 for value in spec["values"]:
                     state = dict(q_min=0.3, half_life=20, epsilon=0.95)
+                    if kind == "exp034":
+                        state["low_water_ratio"] = float(cfg.exp["low_water_ratio"])
                     state.update(spec["fixed"])
                     state[parameter] = value
-                    if not 0 <= state["q_min"] <= 1 or not 0 <= state["epsilon"] <= 1 or state["half_life"] <= 0:
+                    epsilon_ok = (math.isfinite(state["epsilon"]) and state["epsilon"] >= 0
+                                  and (kind == "exp034" or state["epsilon"] <= 1))
+                    if not 0 <= state["q_min"] <= 1 or not epsilon_ok or not math.isfinite(state["half_life"]) or state["half_life"] <= 0:
                         raise ValueError(f"Invalid sensitivity setting: {state}")
+                    if kind == "exp034" and (not math.isfinite(state["low_water_ratio"])
+                            or not 0 <= state["low_water_ratio"] <= 1):
+                        raise ValueError(f"Invalid low-water ratio: {state}")
                     fund = cfg.exp["balances_eth"]
-                    token = f"topup@{fund}@@{state['epsilon']}@@{state['half_life']}@{state['q_min']}"
-                    settings.append((parameter, value, token))
+                    policy = "topup_lowwater" if kind == "exp034" else "topup"
+                    token = f"{policy}@{fund}@@{state['epsilon']}@@{state['half_life']}@{state['q_min']}"
+                    settings.append((parameter, value, token, state.get("low_water_ratio")))
         else:
-            settings = [("figures", name.split("@")[0], name)
+            settings = [("figures", name.split("@")[0], name, None)
                         for name in cfg.exp["arms"].split(",")]
-        for parameter, value, token in settings:
+        for parameter, value, token, lower in settings:
             slug = f"{parameter}_{value}_r{rep}"
             tasks.append(dict(id=slug, sweep=parameter, value=value, round=rep,
                               route_seed=seed, token=token, tag=token_tag(token), status="pending"))
+            if lower is not None:
+                # Keep Windows artifact paths short; the full token and alpha remain in manifest.
+                short_name = {"q_min": "q", "half_life": "h", "epsilon": "e", "low_water_ratio": "a"}[parameter]
+                tasks[-1].update(low_water_ratio=lower, tag=f"lw_{short_name}{value}@a{lower}")
     return tasks
 
 
@@ -103,7 +121,33 @@ def free_port_block(preferred, count):
 
 
 def task_cfg(cfg, task):
-    return apply_overrides(cfg, [f"exp.route_seed={task['route_seed']}", f"exp.arms={task['token']}"])
+    overrides = [f"exp.route_seed={task['route_seed']}", f"exp.arms={task['token']}"]
+    if "low_water_ratio" in task:
+        _, _, _, _, eps, _, half_life, q_min, _ = pipeline._arm_spec(task['token'])
+        overrides += [f"exp.low_water_ratio={task['low_water_ratio']}",
+                      f"exp.tdr_epsilon={eps}", f"exp.tdr_q_min={q_min}",
+                      f"exp.tdr_ewma_half_life={half_life}"]
+    return apply_overrides(cfg, overrides)
+
+
+def validate_task_params(task, doc):
+    """Reject mismatched execution parameters, including the independent lower threshold."""
+    exp = doc['params']['exp']
+    if exp['route_seed'] != task['route_seed']:
+        raise ValueError('Saved route seed mismatch')
+    if 'low_water_ratio' in task:
+        _, engine, _, _, eps, _, half_life, q_min, _ = pipeline._arm_spec(task['token'])
+        expected = dict(arms=task['token'], low_water_ratio=task['low_water_ratio'],
+                        tdr_epsilon=eps, tdr_q_min=q_min, tdr_ewma_half_life=half_life)
+        if any(exp.get(key) != value for key, value in expected.items()):
+            raise ValueError('Saved task execution parameters mismatch')
+        if doc['arms'][0].get('engine') != engine:
+            raise ValueError('Saved task engine mismatch')
+
+
+def task_directory(run, number):
+    """Compact attempt directories avoid Windows MAX_PATH at the default checkout."""
+    return Path(run)/"t"/f"{number:04d}"/datetime.now().strftime("%H%M%S%f")
 
 
 def load_completed(run, task, workload, validate=True, workload_hash=None):
@@ -113,7 +157,14 @@ def load_completed(run, task, workload, validate=True, workload_hash=None):
     doc = json.loads(summary_path.read_text(encoding="utf-8"))
     if doc.get("task_id") != task["id"] or doc.get("workload_sha256") != (workload_hash or digest(workload)):
         raise ValueError(f"Saved task identity/workload mismatch: {task['id']}")
+    validate_task_params(task, doc)
     stats = doc["arms"][0]
+    if (not doc.get("status", {}).get("complete") or not stats.get("gates")
+            or not all(stats["gates"].values()) or not stats["burn_reconcile"]["ok"]
+            or stats["n"] != len(workload) or stats.get("failed", 0)
+            or stats["served"] + stats["relayed"] != stats["n"]
+            or stats["tdr"].get("transfers_lost", 0) or stats["tdr"].get("lost_in_transit_wei", 0)):
+        raise ValueError("Saved task incomplete or failed accounting gates")
     if stats["arm"] != task["tag"] or doc["params"]["exp"]["route_seed"] != task["route_seed"]:
         raise ValueError("Saved arm/route seed mismatch")
     if validate:
@@ -168,7 +219,7 @@ def main(here, kind):
     parser.add_argument("--config", type=Path, default=here/"config.yaml")
     parser.add_argument("--space", type=Path, default=here/"search_space.yaml")
     parser.add_argument("--set", action="append", default=[])
-    parser.add_argument("--only", help="exp025 dimension: q_min, half_life, epsilon (comma separated)")
+    parser.add_argument("--only", help="Sensitivity dimensions: q_min, half_life, epsilon, low_water_ratio (exp034), comma separated")
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--output-root", type=Path, default=here/"out")
     parser.add_argument("--dry-run", action="store_true")
@@ -183,9 +234,9 @@ def main(here, kind):
     reduced = args.rounds is not None and kind != "exp025"
     if reduced:
         cfg = apply_overrides(cfg, [f"exp.repetitions={args.rounds}"])
-    space = yaml.safe_load(args.space.read_text(encoding="utf-8")) if kind == "exp025" else None
+    space = yaml.safe_load(args.space.read_text(encoding="utf-8")) if kind in ("exp025", "exp034") else None
     if args.only:
-        if kind != "exp025":
+        if kind not in ("exp025", "exp034"):
             raise ValueError("--only applies to sensitivity dimensions")
         names = args.only.split(",")
         if set(names) - set(space):
@@ -197,12 +248,23 @@ def main(here, kind):
                                    "exp.balances_eth=5", "exp.drain_tail_s=240"])
         if space:
             space = {key: {**spec, "values": spec["values"][:1]} for key, spec in space.items()}
+        if kind in ("exp033", "exp034"):
+            # Keep the SOTA reference capital: 1 broker sees aggregate traffic;
+            # reducing its capital to 5 ETH can make offline PnP infeasible.
+            cfg = apply_overrides(cfg, ["exp.balances_eth=45", "exp.sota_pnps_epoch_blocks=1"])
+            arms = []
+            for token in cfg.exp["arms"].split(","):
+                parts = token.split("@")
+                if len(parts) > 1:
+                    parts[1] = "45"
+                arms.append("@".join(parts))
+            cfg = apply_overrides(cfg, ["exp.arms=" + ",".join(arms)])
         if kind == "exp026":
             cfg = apply_overrides(cfg, ["exp.arms=plain@5,topup@5@@0.95@@20@0.3", "exp.profit_broker_idx=0"])
     expected = cfg.scale.num_brokers * int(cfg.exp["ctx_per_broker"])
     # 每个实验的正式档规模（CTX/臂, 场次）。exp033 与 exp025 同规模同路由种子，
     # 这样 SOTA 对照点与已发表的 TDR/plain 点落在同一条负载上，可直接比。
-    requirements = {"exp025": (40000, 10), "exp026": (80000, 1), "exp033": (40000, 3)}
+    requirements = {"exp025": (40000, 10), "exp026": (80000, 1), "exp033": (40000, 3), "exp034": (40000, 10)}
     if kind not in requirements:
         raise ValueError(f"Unknown experiment kind {kind!r}")
     required_ctx, required_rounds = requirements[kind]
@@ -212,6 +274,10 @@ def main(here, kind):
     if reduced and expected != required_ctx:
         raise ValueError(f"Analysis pass still needs {required_ctx} CTX per arm")
     tasks = tasks_for(cfg, kind, space)
+    if len({t["id"] for t in tasks}) != len(tasks):
+        raise ValueError("Duplicate arm names/task IDs; use named ablations")
+    if kind in ("exp033", "exp034"):
+        from brokerlab.sota_native import REVISION
     signature = digest(dict(params=to_params_dict(cfg), space=space, kind=kind, smoke=args.smoke))
     print(f"{kind}: {len(tasks)} arm runs x {expected} CTX = {len(tasks)*expected:,}; serial; smoke={args.smoke}", flush=True)
     if args.dry_run:
@@ -233,11 +299,20 @@ def main(here, kind):
     if args.resume and manifest["workload_sha256"] != digest(workload):
         raise ValueError("Trace or selected workload changed")
     manifest["workload_sha256"] = digest(workload)
+    if kind in ("exp033", "exp034"):
+        manifest["algorithm_revision"] = ("exp034-independent-lowwater-v3" if kind == "exp034" else REVISION)
+        if int(cfg.exp.get("sota_training_ctx", 0)):
+            manifest["training_sha256"] = hashlib.sha256((run / "training.json").read_bytes()).hexdigest()
+        manifest["git_head"] = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        manifest["git_dirty"] = bool(subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=ROOT, text=True).strip())
     write_json(run/"manifest.json", manifest)
     write_json(run/"params.json", to_params_dict(cfg))
     write_csv(run/"workload.csv", workload, list(workload[0]))
     try:
         for number, task in enumerate(manifest["tasks"], 1):
+            if manifest["source_files"] != source_fingerprint():
+                raise ValueError("Source changed during run; start a new versioned run")
             if task["status"] == "complete":
                 if load_completed(run, task, workload) is None:
                     raise ValueError("Resume task summary missing")
@@ -245,7 +320,9 @@ def main(here, kind):
             print(f"[{number}/{len(tasks)}] {task['id']} / {task['token']}", flush=True)
             effective = task_cfg(cfg, task)
             effective = replace(effective, chain=replace(effective.chain, base_port=free_port_block(cfg.chain.base_port, cfg.chain.num_shards)))
-            if kind == "exp025":
+            if kind == "exp034":
+                parent = task_directory(run, number)
+            elif kind == "exp025":
                 parent = run/"tasks"/task["id"]/datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             else:
                 # A distinct task summary prevents one failed arm from erasing completed paired data.
@@ -261,9 +338,11 @@ def main(here, kind):
                                          sum(r["amount_wei"] for r in workload), parent, watchdog,
                                          engine=engine, fund_eth=fund, cap_mult=cap, eps=eps, chi=chi, hl=hl, qmin=q_min, frac=frac)
                 export_arm_data(effective, stats, parent/task["tag"], workload)
+                if manifest["source_files"] != source_fingerprint():
+                    raise ValueError("Source changed while task was running")
             finally:
                 watchdog.stop()
-            summary_path = parent/("summary.json" if kind == "exp025" else f"summary_{name}.json")
+            summary_path = parent/("summary.json" if kind in ("exp025", "exp034") else f"summary_{name}.json")
             write_json(summary_path, dict(task_id=task["id"], workload_sha256=digest(workload),
                                          params=to_params_dict(effective), arms=[stats], status={"complete": True}))
             task.update(status="complete", summary=str(summary_path.relative_to(run)))

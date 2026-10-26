@@ -1,0 +1,32 @@
+{
+  "source": "D:\\BaiduNetdiskDownload\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp025_regime_shift_sensitivity\\pipeline.py",
+  "source_sha256": "f9ebcd34253bdb82786fc9c886806417d21609400b428d0a245e4316457b1705",
+  "blueprint": "D:\\BaiduNetdiskDownload\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\submit_regime_shift",
+  "inherited_exp025_fixes": [
+    "receipt probe starvation",
+    "modern move_events interface",
+    "same-shard hotspot collision",
+    "FIFO closure",
+    "reserved balance retained during routing"
+  ],
+  "additional_changes": [
+    "isolated executor",
+    "coordinator receipt audit",
+    "classify real mint legs",
+    "mint receipt exports",
+    "remove phantom incoming credit",
+    "release outgoing reservation only",
+    "credit confirmed service and retained fee",
+    "five explicit policies",
+    "explicit method parameters",
+    "full cost/event/broker ledger"
+  ],
+  "design_revision": 2,
+  "revision_changes": [
+    "Primary count = relay CTX + completed adjustment CTX; each burn+mint pair counts once",
+    "Broker profit reported globally, as mean and per broker",
+    "Removed runner hard-coded epsilon, half-life, q_min overrides; active parameters now read from exp config",
+    "Startup stagger modulus exposed in config",
+    "Automatic postprocessing after all tasks complete; historical outputs not rewritten"
+  ]
+}

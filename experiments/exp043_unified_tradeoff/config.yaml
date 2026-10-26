@@ -1,0 +1,111 @@
+# Fixed matched conditions for all 14 methods. See README_CN.md.
+label: exp043_unified_tradeoff
+exp:
+  rate: 120
+  ctx_per_broker: 800
+  pool_scan: 200000
+  group_cap_mult: 2.0
+  seed: 42
+  route_seed: 7
+  balances_eth: 45
+  sender_window: 2
+  shift_to_shard: 11
+  shift_start_frac: 0.3
+  shift_span_frac: 1.0
+  shift_period_frac: 0.04
+  shift_cycle: 11,3
+  shift_avoid_same_shard: true
+  shift_intensity: 1.0
+  max_backlog: 40000
+  loop_sleep_s: 0.005
+  release_poll_s: 0.15
+  dispatch_per_tick: 200
+  drain_tail_s: 1800
+  refresh_every_blocks: 10
+  refresh_workers: 16
+  max_inflight: 24
+  poll_s: 0.05
+  probe_s: 0.2
+  probe_first_s: 0.9
+  relay_timeout_s: 120
+  engine_timeout_s: 150
+  t_ready_budget_s: 180
+  rss_cap_mb: 9000
+  coord_budget_mult: 6.0
+  tdr_window_blocks: 20
+  tdr_epsilon: 0.95
+  tdr_q_min: 0.3
+  tdr_chi_blocks: 10
+  tdr_timeout_blocks: 20
+  tdr_trigger_mode: excess_only
+  tdr_offset_blocks: 3
+  tdr_block_poll_s: 1.0
+  tdr_cap_mult: 2.0
+  tdr_base_lead_blocks: 6.0
+  tdr_base_safety: 2.0
+  tdr_base_floor_frac: 0.05
+  tdr_ewma_half_life: 20.0
+  arms: plain@45,prop_hard@45@@0.95@10@0@0.3,prop_ewma@45@@0.95@10@20@0.3,topup_hard@45@@0.95@10@0@0.3,topup@45@@0.95@10@20@0.3,topup_e0@45@@0@10@20@0.3,flexichain@45,loopmax@45@@0@10@20@0,spider@45,pnps@45,autoloop@45,overpass_u@45@@0,overpass_d@45@@0,ucrb@45
+  tdr_ewma_min_blocks: 20
+  tdr_ewma_window_blocks: 0
+  tdr_ewma_two_sided: false
+  sota_spider_vol_mult: 0.25
+  sota_autoloop_low: 0.3
+  sota_autoloop_high: 0.7
+  sota_loopmax_horizon_blocks: 20.0
+  sota_loopmax_safety_blocks: 2.0
+  match_ctrl_bytes: 100
+  repetitions: 3
+  route_seed_step: 10
+  plotting_script: experiments/exp043_unified_tradeoff/plot.py
+  sota_training_ctx: 12000
+  sota_pnps_epoch_blocks: 10
+  sota_pnps_outage: 0.05
+  sota_capacity_mult: 2.0
+  sota_check_blocks: 10
+  sota_conf_blocks: 10
+  model_income_per_service: 0.1
+  model_cost_per_transfer: 1.0
+chain:
+  anvil_bin: null
+  mnemonic: myth like bonus scare over problem client lizard pioneer submit female
+    collect
+  num_shards: 16
+  base_port: 32600
+  chain_id_base: 43000
+  block_time_s: 1
+  gas_limit: 30000000
+  num_funded_accounts: 450
+  accounts_balance_eth: 0
+scale:
+  coordinator_index: 1
+  broker_base_index: 100
+  num_brokers: 50
+  user_base_index: 200
+  num_users: 200
+broker:
+  initial_balance_eth: 45
+  relay_mint_budget_eth: 1000
+traffic:
+  kind: real_csv
+  real_csv_path: trace/ETH_cleaned.csv
+  allow_contract_endpoints: false
+  value_floor_eth: 0.01
+  value_cap_eth: 10.0
+  max_extract: 50
+tdr:
+  enabled: true
+  trigger_mode: excess_only
+  window_blocks: 10
+  epsilon: 0.1
+  q_min: 0.1
+  chi_blocks: 5
+  timeout_blocks: 5
+b2e:
+  enabled: false
+  fee_share: 0.1
+  gas_units_per_ctx: 21000
+  ref_gas_price_wei: 1000000000
+  charges_rebalancing: false
+output:
+  results_root: results

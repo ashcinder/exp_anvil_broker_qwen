@@ -1,42 +1,54 @@
-# 实验41：Motivation 与 TDR_OFF 收益阴影折线图
+# 实验41：Fig1专用TDR-off多轮实验
 
-固定关闭TDR，独立运行10轮，为Fig1提供带误差帽的broker/relay堆叠柱，以及未开启TDR的broker收益与潜在收益上限阴影折线。实验40单独执行TDR_ON资金/交易规模扫描。
+本实验只为Fig1收集关闭TDR的数据，与实验40的TDR-on收益扫描独立。每轮每子账户45ETH、40,000用户CTX，16分片、50broker、200用户，重复10轮，**共10次、400,000条用户CTX**。不扫描余额/交易数，不开启TDR、不运行TDR-on对照。
 
-## 参数
+## Fig1左图的柱子与小帽子
 
-16分片、50broker、200用户；每个broker每个分片子账户45ETH；每轮40,000用户CTX，共10次、400,000CTX。1秒/块、释放120CTX/块、sender_window=2；route_seed依次7、17、…、97。每轮独立起链，实际引擎plain、tdr.enabled=false，搬运数必须为0。
+每一轮都按原始 `submit_block` 分到相同的100块区间：[0,100)、[100,200)…。横坐标标区间右端点。所有轮次统一起点、统一宽度，并覆盖最长一轮的全部交易；较短轮次后续区间计0，不裁掉排队尾部、不把不同轮分别缩放到0–500。
 
-从ETH_cleaned选出200k母工作流后取40k前缀，与实验40的基准输入相同；第12,000笔后每1,600笔在目的热点11/3间切换，避免同分片。真实trace选流加人工方向压力，不等于主网原始时间顺序。种子重复反映动态路由/执行差异，不是独立trace。
+先逐轮统计每个区间的broker CTX和relay CTX，再跨轮计算均值及**样本标准差**。柱子是平均broker数量（蓝色底部）与平均relay数量（橙色顶部）的堆叠，纵轴在左边；没有通信量红线及右纵轴。
 
-## 收益与图
+小帽子分别画在broker/relay分界处和堆叠柱顶：前者是broker数量的跨轮标准差，后者是逐轮总数的标准差。总数的标准差直接从每轮总数算，不把两部分标准差相加。若某区间总数恰好不变，顶端误差自然为0，分界处仍可显示路由份额变化。单轮数据不伪造误差棒。
 
-固定手续费F=21,000,000wei。成功broker服务的实际收入为0.1F=2,100,000wei/笔；潜在收入上限为该broker所有指派用户CTX（含后来relay）数×0.1F。不按本金收费，内部搬款不计用户交易或上限。
+输出PNG/PDF及 `fig1a_bins_by_round.csv`、`fig1a_bin_statistics.csv`、`fig1a_metadata.json`，保留每轮种子和区间计数。区块坐标沿用旧Fig1的submission-height口径，不声称不同分片拥有严格同步的墙钟。
 
-- Fig1左图：各轮按照相同的100块区间，从原始submit_block统计broker/relay数量，再汇总均值与样本标准差。蓝色broker在下、橙色relay在上，左侧CTX轴，无通信量红线、无右轴。分界处误差帽是broker数的SD，柱顶误差帽是各轮总数的SD；后者直接计算，不把两部分SD相加。
-- Fig1右图：预先固定broker19，绘制收入与上限的均值±样本SD阴影；同时导出全系统版。横轴是全局arrival_pos累计统计，不声称是同步墙钟收入。动态匹配导致相同编号broker不保证在ON/OFF中收到相同交易。
-- 单轮不伪造误差棒；空区间计0，覆盖最长一轮全部交易，不裁掉排队尾部。
+## 参数与费用
+
+每轮route_seed依次为7、17、…、97；选流seed42。和实验40采用同一200k母工作流设计，选出后取前40k；目的热点从第12,000笔开始、每1,600笔在11/3轮换。rate=120、1秒/块、sender_window=2。该组40k基准与实验40的40k基准应具有相同工作流哈希。
+
+TDR实际引擎为plain，落盘 `tdr.enabled=false`，每轮搬运次数必须为0，否则校验失败。保持固定手续费机制开启：F=21,000,000wei，broker成功服务收入0.1F=2,100,000wei。relay对应的指派仍进入该broker潜在收入上限，内部搬款不计。
+
+因此这10次还会导出Fig1右图的未开启TDR收益与上限曲线，阴影为跨整轮均值±样本标准差，无须额外实验。
 
 ## 运行
 
-从仓库根目录，安装requirements.txt及Foundry/anvil，准备被Git忽略的trace/ETH_cleaned.csv：
+从C盘工程根目录执行：
 
 ```powershell
+# 查看10次off-only计划
 python experiments/exp041_fig1_plain_repeats/run.py --dry-run
+
+# 小规模验证：2分片2broker，40CTX×2轮=80CTX；用于检查误差帽，不是正式数据
 python experiments/exp041_fig1_plain_repeats/run.py --smoke
+
+# 准备真实工作流，不执行十轮
+python experiments/exp041_fig1_plain_repeats/run.py --prepare-only --no-plot
+
+# 正式10轮；不会启动170次扫描
 python experiments/exp041_fig1_plain_repeats/run.py
+
+# 暂停在首轮后，后续续跑
+python experiments/exp041_fig1_plain_repeats/run.py --max-tasks 1 --no-plot
+python experiments/exp041_fig1_plain_repeats/run.py --resume '本实验运行目录'
+
+# 完整结果单独重绘；不完整探索数据需追加--allow-partial
+python experiments/exp041_fig1_plain_repeats/analyze.py --source '本实验运行目录'
 ```
 
-smoke为2分片2broker、40CTX×2轮，标SMOKE；正式模式是10轮。可先用--prepare-only --no-plot只准备数据，或--max-tasks 1 --no-plot仅执行首轮。
+独立配置和输出均在本目录，执行入口共享相邻实验40的链执行/记账代码。迁移时同时保留两个目录，以及完整exp025后端。本机后端自动使用D盘完整工程；也可传 `--backend-root`。
 
-```powershell
-python experiments/exp041_fig1_plain_repeats/run.py --resume '本实验完整运行目录'
-python experiments/exp041_fig1_plain_repeats/analyze.py --source '本实验完整运行目录'
-```
+两实验共用运行锁，必须串行；各自有独立manifest、任务状态、失败重试记录。续跑保留首次--smoke/--rounds/--set，配置或源码变更请开新运行。旧340次配对计划的manifest不接入这两个新实验。
 
-续跑保留首次--smoke/--rounds/--set；源码、配置、工作流或数据变更拒绝续跑，失败重试另开attempt。未完成结果仅能通过--allow-partial生成显式标记的探索图。
+主要产物：`figs/fig1a_tdr_off.png/.pdf`，仅包含broker/relay柱子及真实重复误差；`fig1b_broker_19.*`是未开启TDR的单broker收益/潜在上限曲线，另有system汇总版。所有逐笔CTX与费用、守恒检查记录均保留。
 
-产物在本目录out/<时间戳>/：独立manifest/report、每轮原始CTX/TDR台账、per_broker.csv、revenue_curve.csv、figs/fig1a_tdr_off.png/.pdf、逐轮分箱/均值SD CSV、fig1b_broker_19.png/.pdf及system版。
-
-本入口共享相邻实验40的执行/记账代码，因此迁移时保留两个目录。两实验共享端口45940的串行锁；实验40运行时本实验拒绝启动，反之亦然。不要改锁端口绕过同机串行保护。
-
-本仓库统一编号为40=TDR_ON、41=TDR_OFF，与最初本地实验目录一致。上一版上传时编号相反，勿混用旧目录或manifest。
+本次按用户要求仅交付代码与小规模验证，不启动正式10轮。

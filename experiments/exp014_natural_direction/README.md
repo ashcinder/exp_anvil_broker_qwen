@@ -29,7 +29,7 @@ python experiments/exp014_natural_direction/plot_balances.py --arm-dir "<实际�
 
 策略目录须含balance_snapshots.csv及tdr_move_events.csv。默认从策略目录名读取epsilon，也可显式指定--epsilon；--out-dir可指定图集输出位置。生成50个broker总览PNG/PDF及800个子账户PNG，并提供index.html筛选浏览。
 
-蓝线为已确认余额，橙线为最近一次决策目标，灰色边界为(1±epsilon)*tau，红圆/三角为实际确认的TDR转出/转入。执行期与冷却期目标仍可能保持旧值；它不是逐块重新计算的实时目标。不同分片有独立区块时钟，确认块高差不能直接等同于精确耗时。
+蓝线为已确认余额，橙线为最近一次决策目标，灰色边界为(1±epsilon)*tau，红色倒三角标记已确认的TDR转出，绿色正三角标记已确认的TDR转入。执行期与冷却期目标仍可能保持旧值；它不是逐块重新计算的实时目标。不同分片有独立区块时钟，确认块高差不能直接等同于精确耗时。
 
 ## 实现与结果口径
 
@@ -38,3 +38,24 @@ EWMA Topup默认使用缺货下界和盈余来源上界配对，不是单独超�
 metrics.csv、summary.json及原始台账用于校验成功率、资金守恒、Relay与TDR开销。TDR事件可能包含多笔资金转移，每笔正常包含burn/mint两段，不能混淆事件数、转移数及链上段数。仅单方法实验不能识别相对其他方法的性能优势。
 
 运行数据集、结果、生成图集、审计统计和本地备份均不上传GitHub。
+
+## 时间预算与异常诊断
+
+rate 的单位是 CTX/区块，而不是 CTX/秒。运行预算同时考虑区块释放时间、
+同一 (sender_idx, src_shard) 的 sender_window 限制，以及两段转账的排队时间，
+再加 drain_tail_s。预算是根据冻结 workload 估算的运行上限，不是已测量的耗时；
+正常完成会提前结束，RPC、TDR 竞争和慢出块仍会消耗额外余量。
+
+当前 80000 笔、120 CTX/块、5 秒/块、sender_window=2 的自然负载中，
+最繁忙的发送者组有 1411 笔，按两段确认估算完成需要 1413 块。
+因此时间预算为 1413×5+1800=8865 秒，而非仅按释放计算的 5135 秒。
+这是该 workload 的估算；其他负载会自动重新计算。
+
+超时后停止新派发，但继续处理在途 burn/mint 请求及真实回执；
+异常收口宽限根据引擎、relay、TDR 超时参数计算，当前为 170 秒。
+超时运行始终标记为不完整，不会因为收到部分结果而通过验收。
+
+策略目录中的 execution_budget.json 记录预算；coordinator_progress.json
+每约 30 秒记录派发、落定、等待队列、发送者组与在途 broker/CTX 编号。
+已收到的 broker 信封保存在 engine_results/broker_XX.json；
+failure.json 记录异常和缺失 broker。这些部分文件不能当作成功实验的全量余额图。

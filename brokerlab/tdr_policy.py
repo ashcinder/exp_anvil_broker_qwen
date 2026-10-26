@@ -419,7 +419,9 @@ def base_target(actual: t.Sequence[int], demand: t.Sequence[int],
 def topup_plans(actual: t.Sequence[int], target: t.Sequence[int],
                 epsilon: float,
                 surplus_epsilon: t.Optional[float] = None,
-                two_sided: bool = False) -> t.List[Transfer]:
+                two_sided: bool = False,
+                recipient_floor_wei: t.Optional[int] = None,
+                recipient_ratio: t.Optional[float] = None) -> t.List[Transfer]:
     """只补缺口、绝不下抽的再平衡（valve 纪律 × 需求份额目标）。
 
     与 compute_transfers 的全部差别：compute_transfers 触发后把【所有】盈余
@@ -431,7 +433,21 @@ def topup_plans(actual: t.Sequence[int], target: t.Sequence[int],
     高于 (1+ε)τ 都能触发。若只有一侧越界，另一侧可从所有实际缺口/盈余
     账户中配对；仍只搬运匹配账户之间所需的缺口金额。
 
+    recipient_ratio is the independent lower trigger alpha: actual < alpha*target.
+    It changes only recipient selection, never the target allocation or donor epsilon.
+    It is mutually exclusive with the historical absolute recipient_floor_wei.
+
     返回 [] = 无缺口/无盈余可补。仅填缺口、可部分填（盈余不够就欠着）。"""
+    # Historical q-floor and independent-alpha variants change only recipient selection.
+    # Retain the same matching/refill target and the old policy when unset.
+    if recipient_ratio is not None:
+        import math
+        if (not math.isfinite(recipient_ratio) or not 0 <= recipient_ratio <= 1
+                or two_sided or recipient_floor_wei is not None):
+            raise ValueError("recipient_ratio requires a finite [0,1] ratio and no other lower threshold")
+    if recipient_floor_wei is not None:
+        if recipient_floor_wei < 0 or two_sided:
+            raise ValueError("q-floor requires a nonnegative floor and one-sided mode")
     if two_sided:
         low = [[i, target[i] - actual[i]]
                for i in range(len(actual))
@@ -450,7 +466,9 @@ def topup_plans(actual: t.Sequence[int], target: t.Sequence[int],
         deficit = [[i, target[i] - actual[i]]
                    for i in range(len(actual))
                    if target[i] - actual[i] > 0
-                   and actual[i] < target[i] - percent_of(target[i], epsilon)]
+                   and actual[i] < (recipient_floor_wei if recipient_floor_wei is not None
+                                    else percent_of(target[i], recipient_ratio) if recipient_ratio is not None
+                                    else target[i] - percent_of(target[i], epsilon))]
         surplus = [[i, actual[i] - target[i]]
                    for i in range(len(actual))
                    if actual[i] - target[i] > 0

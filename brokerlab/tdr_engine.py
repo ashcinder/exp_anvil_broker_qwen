@@ -17,14 +17,16 @@ PLAN 锁定的三条纪律在这里成立：
 修复审计 F3 的"需求盲区"。纯逻辑 + 注入时钟，单测不需要 anvil。
 """
 import typing as t
+import math
 
 from .tdr_policy import (DemandWindow, EwmaDemand, compute_target,
                          compute_transfers, percent_of, valve_plans,
-                         base_target, topup_plans, Transfer)
+                         base_target, topup_plans, BPS_SCALE, Transfer)
 from .sota_policies import (autoloop_plans, flexichain_plans, loopmax_plans,
                             overpass_target, pnps_target, spider_plans,
                             ucrb_plans, uniform_level, uniform_target)
 
+from .sota_native import (rescue_plans, autoloop_plans, loopmax_plans, overpass_target)
 
 class TdrAgent:
     """单 broker 的 TDR 代理。engine_tick 每块调一次；返回待执行转账清单。"""
@@ -34,9 +36,11 @@ class TdrAgent:
     POLICY_PROPORTIONAL = "proportional"   # λ 比例分配（论文，带需求窗口）
     POLICY_VALVE = "valve"                 # 傻瓜水位阀（消融对照，无需求预测）
     POLICY_BASE = "base"                   # base-stock：按流出速率定缓冲线，需求侧缺货触发
+    POLICY_TOPUP_LOW_WATER = "topup_lowwater"  # independent alpha recipient threshold
+    POLICY_TOPUP_QFLOOR = "topup_qfloor"  # exp034: q_min recipient floor, epsilon donor ceiling
     POLICY_TOPUP = "topup"                 # 需求份额目标 τ × 只补缺口不下抽（valve 纪律）
     # —— SOTA 对照臂（决策规则与实现见 sota_policies.py）——
-    POLICY_FLEXICHAIN = "flexichain"       # TOPS'24：静态均分目标，只补缺口
+    POLICY_FLEXICHAIN = "flexichain"       # 均分初始化；当前支付不足时救援
     POLICY_LOOPMAX = "loopmax"             # ePrint 22/1385：预测型触发 + 搬满
     POLICY_SPIDER = "spider_vol"           # NSDI'20 §7.4：按累计流水量定频，均衡
     POLICY_PNPS = "pnps_static"            # INFOCOM'20：一次性规划，此后永不再平衡
@@ -60,13 +64,18 @@ class TdrAgent:
                  min_reserve_wei: int = 0,
                  surplus_epsilon: t.Optional[float] = None,
                  topup_two_sided: bool = False,
+                 low_water_ratio: float = 0.3,
                  # —— SOTA 对照臂专用旋钮（默认值对既有策略完全无影响）——
                  spider_vol_wei: int = 0,
                  autoloop_low: float = 0.3,
                  autoloop_high: float = 0.7,
                  loopmax_horizon_blocks: float = 0.0,
                  loopmax_safety_blocks: float = 3.0,
-                 overpass_theta: str = "uniform") -> None:
+                 overpass_theta: str = "uniform",
+                 sota_capacity_wei: int = 0,
+                 sota_check_blocks: int = 10,
+                 sota_conf_blocks: int = 10,
+                 qp_capacities=None, qp_weights=None) -> None:
         self.num_shards = int(num_shards)
         # 需求源二选一：ewma_half_life>0 用指数平滑（可选有限滑窗），否则硬窗口。
         self.demand_ewma_half_life = float(demand_ewma_half_life)
@@ -91,7 +100,14 @@ class TdrAgent:
         self.min_reserve_wei = int(min_reserve_wei)
         self.surplus_epsilon = (self.epsilon if surplus_epsilon is None
                                 else float(surplus_epsilon))
+        self.low_water_ratio = float(low_water_ratio)
+        if not math.isfinite(self.low_water_ratio) or not 0 <= self.low_water_ratio <= 1:
+            raise ValueError("low_water_ratio must be finite and in [0, 1]")
         self.topup_two_sided = bool(topup_two_sided)
+        if self.policy == self.POLICY_TOPUP_LOW_WATER and (self.topup_two_sided or min_reserve_wei or target_cap):
+            raise ValueError("topup_lowwater requires one-sided mode, without absolute reserve or cap")
+        if self.policy == self.POLICY_TOPUP_QFLOOR and (self.topup_two_sided or min_reserve_wei or target_cap):
+            raise ValueError("topup_qfloor uses q_min alone: disable two-sided, absolute reserve and cap")
         # SOTA 对照臂参数（只在对应 policy 下被读取；其余策略下是死状态）
         self.spider_vol_wei = int(spider_vol_wei)
         self.autoloop_low = float(autoloop_low)
@@ -99,6 +115,14 @@ class TdrAgent:
         self.loopmax_horizon_blocks = float(loopmax_horizon_blocks)
         self.loopmax_safety_blocks = float(loopmax_safety_blocks)
         self.overpass_theta = str(overpass_theta)
+        self.sota_capacity_wei = int(sota_capacity_wei or 2 * valve_init_wei)
+        self.sota_check_blocks = int(sota_check_blocks)
+        self.sota_conf_blocks = int(sota_conf_blocks)
+        self.qp_capacities = qp_capacities
+        self.qp_weights = qp_weights
+        self._last_policy_check = None
+        if self.sota_check_blocks <= 0 or self.sota_conf_blocks < 0:
+            raise ValueError("invalid SOTA check/confirmation intervals")
         if not (0.0 <= self.autoloop_low < self.autoloop_high <= 1.0):
             raise ValueError("autoloop band must satisfy 0 <= low < high <= 1")
         if self.overpass_theta not in ("uniform", "demand"):
@@ -109,11 +133,16 @@ class TdrAgent:
             raise ValueError("loopmax horizons must be >= 0")
         # Topup's epsilon=1 is a valid boundary control: its shortage
         # threshold is zero. Other policies retain the existing domain.
-        epsilon_limit = 1.0 if self.policy == self.POLICY_TOPUP else None
-        if not (0 <= self.epsilon < 1 or self.epsilon == epsilon_limit):
-            raise ValueError("epsilon must be in [0, 1), or 1 for Topup")
-        if not (0 <= self.surplus_epsilon < 1 or self.surplus_epsilon == epsilon_limit):
-            raise ValueError("surplus_epsilon must be in [0, 1), or 1 for Topup")
+        if self.policy in (self.POLICY_TOPUP_QFLOOR, self.POLICY_TOPUP_LOW_WATER):
+            # No epsilon lower-side band: any finite nonnegative upper multiplier is valid.
+            if any(not math.isfinite(e) or e < 0 for e in (self.epsilon, self.surplus_epsilon)):
+                raise ValueError("q-floor epsilon and surplus_epsilon must be finite and >= 0")
+        else:
+            epsilon_limit = 1.0 if self.policy == self.POLICY_TOPUP else None
+            if not (0 <= self.epsilon < 1 or self.epsilon == epsilon_limit):
+                raise ValueError("epsilon must be in [0, 1), or 1 for Topup")
+            if not (0 <= self.surplus_epsilon < 1 or self.surplus_epsilon == epsilon_limit):
+                raise ValueError("surplus_epsilon must be in [0, 1), or 1 for Topup")
         if not 0 <= self.q_min <= 1:
             raise ValueError("q_min must be in [0, 1]")
         if (self.target_cap < 0 or self.target_cap > 1
@@ -143,12 +172,16 @@ class TdrAgent:
         self._tracks_inflow = self.policy == self.POLICY_LOOPMAX
         self._flowed_wei = 0                       # 累计流水（spider 定频用）
         self._spider_next = self.spider_vol_wei    # 下次触发的水位
-        self._pnps_done = False                    # pnps 一次性规划已用掉
+        self._pnps_done = self.policy == self.POLICY_PNPS                    # pnps 一次性规划已用掉
         self._pending_shortfall: t.Dict[int, int] = {}   # ucrb：失败缺口待补
         # loopmax 需要"流入"侧估计（src 分片需求）来算净需求 Â_net。
         # 与流出侧同源同参：hl>0 用 EWMA，否则用硬窗口——两边单位必须一致。
         self._inflow_window: t.Optional[DemandWindow] = None
         self._inflow_ewma: t.Optional[EwmaDemand] = None
+        self._loop_outflow_window = DemandWindow(self.window.window_blocks)
+        self._loop_outflow_ewma = EwmaDemand(
+            half_life_blocks=float(demand_ewma_half_life) if demand_ewma_half_life > 0 else 20.,
+            min_blocks=int(demand_ewma_min_blocks), window_blocks=int(demand_ewma_window_blocks))
         if self._tracks_inflow:
             self._inflow_window = DemandWindow(self.window.window_blocks)
             self._inflow_ewma = EwmaDemand(
@@ -169,12 +202,22 @@ class TdrAgent:
             self.demand_observed_total += 1
             # SOTA 臂的附加统计（对既有策略无副作用）：
             #   spider：累计流水量定频；loopmax：流入侧（src 分片）需求估计。
-            if self._tracks_flow:
-                self._flowed_wei += int(value)
-            if self._tracks_inflow and src_shard is not None:
-                self._inflow_window.observe(block, int(src_shard), value)
-                if self.demand_ewma_half_life > 0:
-                    self._inflow_ewma.observe(block, int(src_shard), value)
+    def record_success(self, value: int, block=0, dst_shard=None, src_shard=None) -> None:
+        if self._tracks_flow and value > 0:
+            self._flowed_wei += int(value)
+        if self._tracks_inflow and value > 0 and src_shard is not None and dst_shard is not None:
+            self._inflow_window.observe(block, src_shard, value)
+            self._inflow_ewma.observe(block, src_shard, value)
+            self._loop_outflow_window.observe(block, dst_shard, value)
+            self._loop_outflow_ewma.observe(block, dst_shard, value)
+
+    def start_rescue(self, block, available, shard, amount):
+        if self.policy not in (self.POLICY_FLEXICHAIN, self.POLICY_UCRB):
+            return []
+        if self.state != self.ST_IDLE:
+            return []
+        gap = max(0, int(amount) - int(available[shard]))
+        return self.open_plan(block, rescue_plans(available, {shard: gap}))
 
     def notify_shortfall(self, shard: int, value: int) -> None:
         """ucrb 的反应式输入：终审改判 relay 时引擎回报缺口。其余策略忽略。"""
@@ -221,6 +264,12 @@ class TdrAgent:
                 and block < self.last_event_block + self.chi_blocks):
             return []                              # χ 块最小间隔未到
         av = [int(a) for a in available]
+        if self.policy in (self.POLICY_FLEXICHAIN, self.POLICY_UCRB, self.POLICY_PNPS):
+            return []  # current-payment repair / prefunding, never periodic topup
+        if self.policy in (self.POLICY_AUTOLOOP, self.POLICY_LOOPMAX, self.POLICY_OVERPASS):
+            if self._last_policy_check is not None and block < self._last_policy_check + self.sota_check_blocks:
+                return []
+            self._last_policy_check = block
         if self.policy == self.POLICY_VALVE:
             # 傻瓜水位阀：不看需求窗口，余额到 init×cap 才触发。
             # 无需窗口冷启动保护（触发条件本身就是水位），但保留错峰偏移。
@@ -245,7 +294,7 @@ class TdrAgent:
             # excess_only 语义：只有当某个分片【高于自己缓冲线】才动，
             # 动时把盈余喂给低于自己线的分片——天然满足"只从有富余的分片取"。
             plans = compute_transfers(av, line, self.epsilon, "excess_only")
-        elif self.policy == self.POLICY_TOPUP:
+        elif self.policy in (self.POLICY_TOPUP, self.POLICY_TOPUP_QFLOOR, self.POLICY_TOPUP_LOW_WATER):
             # 需求份额目标 τ（proportional 的目标）＋ valve 的只补不下抽纪律。
             # 用 τ 给热分片高位缓冲；但只填低于 τ 的缺口、从高于 τ 的取，
             # 补完即停、盈余闲置——避免 proportional 每次全量重排的搬运浪费。
@@ -259,26 +308,27 @@ class TdrAgent:
             tau = compute_target(av, lam, q_min=effective_qmin,
                                  cap=self.target_cap)
             self.last_target = list(tau)
+            floor = (rho * int(self.q_min * BPS_SCALE) // (self.num_shards * BPS_SCALE)
+                     if self.policy == self.POLICY_TOPUP_QFLOOR else None)
             plans = topup_plans(av, tau, self.epsilon,
                                 self.surplus_epsilon,
-                                two_sided=self.topup_two_sided)
-        elif self.policy == self.POLICY_FLEXICHAIN:
-            # 静态均分目标 + 只补缺口的 CoinShift。原文分配发生在建链时，
-            # 本设定用"第一个完整需求窗口就绪"作等价冷启动门。
-            if not self._req_ready(block):
-                return []
-            self.last_target = [uniform_level(av)] * self.num_shards
-            plans = flexichain_plans(av)
+                                two_sided=self.topup_two_sided,
+                                recipient_floor_wei=floor,
+                                recipient_ratio=(self.low_water_ratio
+                                    if self.policy == self.POLICY_TOPUP_LOW_WATER else None))
         elif self.policy == self.POLICY_LOOPMAX:
-            # 预测型触发（ETTD < horizon）+ 搬满（ε=0 全量补齐 + 安全边际）。
+            # 预测耗尽/饱和；最大可行请求与安全额，内部配对为平台适配。
             if not self._req_ready(block):
                 return []
-            lam, _ = self._req_demand(block)
+            lam = (self._loop_outflow_ewma.demand(block, self.num_shards)[0]
+                   if self.demand_ewma_half_life > 0 else
+                   self._loop_outflow_window.demand(block, self.num_shards)[0])
             horizon = (self.loopmax_horizon_blocks
-                       or float(self.window.window_blocks + self.chi_blocks))
+                       or float(self.sota_check_blocks + self.sota_conf_blocks))
             plans = loopmax_plans(av, lam, self._inflow_demand(block),
                                   self.q_min, self._eff_window(), horizon,
-                                  self.loopmax_safety_blocks)
+                                  self.loopmax_safety_blocks,
+                                  capacities=[self.sota_capacity_wei] * self.num_shards)
         elif self.policy == self.POLICY_SPIDER:
             # 定频：累计流水量到阈值才均衡一次，与真实失衡程度无关。
             if block < self._start_block + self.offset_blocks:
@@ -289,40 +339,23 @@ class TdrAgent:
             plans = spider_plans(av)
             if plans:
                 self._spider_next = self._flowed_wei + self.spider_vol_wei
-        elif self.policy == self.POLICY_PNPS:
-            # 一次性离线规划：用第一个完整窗口做一次 λ 比例分配，此后冻结。
-            if self._pnps_done or not self._req_ready(block):
-                return []
-            self._pnps_done = True
-            lam, _ = self._req_demand(block)
-            tau = pnps_target(av, lam, self.q_min)
-            self.last_target = list(tau)
-            plans = compute_transfers(av, tau, 0.0, "excess_only")
         elif self.policy == self.POLICY_AUTOLOOP:
             # 穿 band 才动、动到中点（无需求预测）。
             if block < self._start_block + self.offset_blocks:
                 return []
             self.last_target = [int((self.autoloop_low + self.autoloop_high)
-                                    / 2 * self.valve_init_wei)] * self.num_shards
-            plans = autoloop_plans(av, self.valve_init_wei,
+                                    / 2 * self.sota_capacity_wei)] * self.num_shards
+            plans = autoloop_plans(av, self.sota_capacity_wei,
                                    self.autoloop_low, self.autoloop_high)
         elif self.policy == self.POLICY_OVERPASS:
-            # KKT 闭式解 τ=θ·L；触发沿用原文的"低于阈值×容量"⇒ 低于目标一个死区。
+            # Alg.3 周期有界 QP；不混入 Alg.2 阈值或 TDR 地板/死区。
             if not self._req_ready(block):
                 return []
             lam, _ = self._req_demand(block)
-            tau = overpass_target(av, lam, self.overpass_theta, self.q_min)
+            tau = overpass_target(av, lam, self.overpass_theta,
+                                  capacities=self.qp_capacities, weights=self.qp_weights)
             self.last_target = list(tau)
-            below = any(av[i] < tau[i] - percent_of(tau[i], self.epsilon)
-                        for i in range(len(av)))
-            plans = compute_transfers(av, tau, 0.0, "excess_only") if below else []
-        elif self.policy == self.POLICY_UCRB:
-            # 反应式：只在收到失败缺口回报后才动，没有任何前瞻。
-            if block < self._start_block + self.offset_blocks:
-                return []
-            plans = ucrb_plans(av, self._pending_shortfall)
-            if plans:
-                self._pending_shortfall = {}
+            plans = compute_transfers(av, tau, 0.0, "excess_only")
         else:
             if not self._req_ready(block):
                 return []                          # 冷启动保护：未满一个完整窗口
@@ -333,6 +366,11 @@ class TdrAgent:
             self.last_target = list(tau)
             plans = compute_transfers(av, tau, self.epsilon, self.trigger_mode)
         if not plans:
+            return []
+        return self.open_plan(block, plans)
+
+    def open_plan(self, block, plans):
+        if not plans or self.state != self.ST_IDLE:
             return []
         self.state = self.ST_ACTIVE
         self.events_opened += 1

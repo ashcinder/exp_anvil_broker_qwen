@@ -1,0 +1,64 @@
+{
+  "validated_at": "2026-10-22T14:32:25.842220",
+  "unit_checks_passed": 6,
+  "smoke_run": "C:\\Users\\hzy\\Downloads\\out\\exp045_plain_sensitivity\\smoke_20261022_142418_254631",
+  "smoke_complete": true,
+  "smoke_checks": [
+    {
+      "task": "b_r01_b45_n2000_plain",
+      "n": 2000,
+      "served": 2000,
+      "relay": 0,
+      "failed": 0,
+      "gates": {
+        "G1_all_ok": true,
+        "G2_no_dup_no_loss": true,
+        "G3a_broker_ledger_eq_chain": true,
+        "G3b_global_net_zero": true,
+        "G4_reports_complete": true
+      },
+      "tdr": {
+        "events_opened": 0,
+        "transfers_done": 0,
+        "moved_wei": 0,
+        "transfers_lost": 0,
+        "lost_in_transit_wei": 0
+      },
+      "started": "2026-10-22T14:24:19.020530",
+      "ended": "2026-10-22T14:27:51.272871"
+    },
+    {
+      "task": "c_r01_b15_n2000_plain",
+      "n": 2000,
+      "served": 2000,
+      "relay": 0,
+      "failed": 0,
+      "gates": {
+        "G1_all_ok": true,
+        "G2_no_dup_no_loss": true,
+        "G3a_broker_ledger_eq_chain": true,
+        "G3b_global_net_zero": true,
+        "G4_reports_complete": true
+      },
+      "tdr": {
+        "events_opened": 0,
+        "transfers_done": 0,
+        "moved_wei": 0,
+        "transfers_lost": 0,
+        "lost_in_transit_wei": 0
+      },
+      "started": "2026-10-22T14:27:51.297441",
+      "ended": "2026-10-22T14:31:35.420550"
+    }
+  ],
+  "resume_skips_complete_without_new_attempt": true,
+  "formal_run": "C:/Users/hzy/Downloads/out/exp045_plain_sensitivity/20261022_142605_346701",
+  "new_formal_tasks": 170,
+  "reused_verified": 10,
+  "formal_launch_checked_at": "2026-10-22T14:34:08.345795",
+  "formal_launcher_pid": 35312,
+  "formal_anvil_nodes": 16,
+  "parallel_checks_pass": true,
+  "original_fig5c_complete": 27,
+  "original_fig5b_complete": 22
+}

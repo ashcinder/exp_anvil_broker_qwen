@@ -1,0 +1,52 @@
+{
+  "unit_tests_passed": 8,
+  "smoke_run": "C:\\Users\\hzy\\Downloads\\exp_anvil_broker_qwen\\exp_anvil_broker_qwen\\experiments\\exp040_liquidity_scale\\sota_supplement\\out\\smoke_20261022_083936_550954",
+  "smoke_trials": [
+    {
+      "method": "autoloop",
+      "n": 2000,
+      "served": 2000,
+      "relay": 0,
+      "failed": 0,
+      "transfers": 341,
+      "lost": 0,
+      "gates": {
+        "G1_all_ok": true,
+        "G2_no_dup_no_loss": true,
+        "G3a_broker_ledger_eq_chain": true,
+        "G3b_global_net_zero": true,
+        "G4_reports_complete": true
+      },
+      "burn_ok": true,
+      "wall_s": 212.64
+    },
+    {
+      "method": "spider",
+      "n": 2000,
+      "served": 2000,
+      "relay": 0,
+      "failed": 0,
+      "transfers": 780,
+      "lost": 0,
+      "gates": {
+        "G1_all_ok": true,
+        "G2_no_dup_no_loss": true,
+        "G3a_broker_ledger_eq_chain": true,
+        "G3b_global_net_zero": true,
+        "G4_reports_complete": true
+      },
+      "burn_ok": true,
+      "wall_s": 224.39
+    }
+  ],
+  "formal_run": "C:\\Users\\hzy\\Downloads\\out\\exp040_sota_supplement\\20261022_084455_055681",
+  "formal_pid": 4364,
+  "formal_started": true,
+  "planned_new_tasks": 200,
+  "tdr_tasks_to_run": 0,
+  "fig5a_native_policy_sha256": "95116f2081d2f313495fb3482645754b3bbb9d2869ff5622fe0c77ea9b380d37",
+  "native_policy_matches_saved_exp043": true,
+  "original_base_inputs_unchanged": true,
+  "source_workload_sha256": "22f6ff606dd94747fb5b757047b1435dfebf06bd830a57ea87d7f35be2a551c9",
+  "initial_reduced_topology_smoke": "Failed completeness; retained separately, excluded; replaced by original-topology prefix replay"
+}

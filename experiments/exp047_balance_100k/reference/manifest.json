@@ -1,0 +1,7 @@
+{
+  "protocol": "exp047-balance-100k-four-methods-v1",
+  "workload_sha256": "a253876b5e9cac2de08f7cc56dc8d57c9991a8ae569ec921dbb41bfb5c649b92",
+  "user_ctx": 100000,
+  "runtime": "experiments/exp045_plain_sensitivity_supplement/runtime/c",
+  "source": "Exact input and base configuration of the formal exp047 run started 2026-10-24"
+}
